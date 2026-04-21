@@ -1,0 +1,228 @@
+---
+title: "Interactive Fixed Effects with xtife"
+author: "Binzhi Chen"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Interactive Fixed Effects with xtife}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  fig.width = 7,
+  fig.height = 4
+)
+```
+
+## Introduction
+
+Standard two-way fixed effects (TWFE) estimators control for unobserved
+unit-specific and time-specific heterogeneity through additive fixed effects
+$\alpha_i$ and $\xi_t$.  In many empirical settings, however, unobserved
+confounders interact: a unit's exposure to a common shock depends on its
+own latent characteristics.
+
+The **Interactive Fixed Effects (IFE)** model of Bai (2009) generalises TWFE
+by replacing the additive error structure with a factor model:
+
+$$y_{it} = \alpha_i + \xi_t + X_{it}'\beta + \lambda_i'F_t + u_{it}$$
+
+where $F_t \in \mathbb{R}^r$ are common factors and $\lambda_i \in \mathbb{R}^r$
+are unit-specific loadings.  The term $\lambda_i'F_t$ captures unobserved
+heterogeneity that varies over both dimensions simultaneously.
+
+`xtife` provides a pure base-R implementation with:
+
+- **Analytical standard errors**: homoskedastic, HC1 robust, cluster-robust by unit
+- **Asymptotic bias correction**: Bai (2009) static and Moon & Weidner (2017) dynamic
+- **Factor number selection**: information criteria from Bai & Ng (2002) and Bai (2009)
+
+---
+
+## Quick Start
+
+```{r quickstart}
+library(xtife)
+data(cigar)
+
+# Fit IFE with r=2 factors, two-way FE, cluster-robust SE
+fit <- ife(sales ~ price, data = cigar,
+           index  = c("state", "year"),
+           r      = 2,
+           force  = "two-way",
+           se     = "cluster")
+print(fit)
+```
+
+The output shows the coefficient table, convergence status, factor selection
+criteria, and (when enabled) bias correction details.
+
+Access individual components:
+
+```{r components}
+# Estimated coefficients
+fit$coef
+
+# Standard errors
+fit$se
+
+# p-values
+fit$pval
+
+# 95% confidence intervals
+fit$ci
+
+# Estimated factors (T x r matrix)
+dim(fit$F_hat)
+
+# Estimated loadings (N x r matrix)
+dim(fit$Lambda_hat)
+```
+
+---
+
+## Standard Error Types
+
+Three SE estimators are available via the `se` argument:
+
+| `se =`     | Formula | When to use |
+|------------|---------|-------------|
+| `"standard"` | $\hat{\sigma}^2 (\tilde{X}'\tilde{X})^{-1}$ | Benchmark; assumes homoskedasticity |
+| `"robust"` | HC1 sandwich | Heteroskedasticity across $it$ cells |
+| `"cluster"` | Cluster-robust by unit $i$ | Serial correlation within units (most panels) |
+
+```{r se_types}
+fit_std <- ife(sales ~ price, data = cigar,
+               index = c("state", "year"), r = 2, se = "standard")
+fit_rob <- ife(sales ~ price, data = cigar,
+               index = c("state", "year"), r = 2, se = "robust")
+fit_cl  <- ife(sales ~ price, data = cigar,
+               index = c("state", "year"), r = 2, se = "cluster")
+
+# Compare standard errors
+se_table <- data.frame(
+  se_type  = c("standard", "robust (HC1)", "cluster"),
+  coef     = c(fit_std$coef, fit_rob$coef, fit_cl$coef),
+  se       = c(fit_std$se,   fit_rob$se,   fit_cl$se),
+  t_stat   = c(fit_std$tstat, fit_rob$tstat, fit_cl$tstat)
+)
+print(se_table, digits = 4, row.names = FALSE)
+```
+
+Cluster-robust SEs are typically larger (>= robust >= standard) because they
+account for serial dependence within units.
+
+---
+
+## Selecting the Number of Factors
+
+Use `ife_select_r()` to compare information criteria across candidate values of $r$:
+
+```{r select_r, eval=FALSE}
+# Not run during package build (takes ~30 s on cigar data)
+sel <- ife_select_r(sales ~ price, data = cigar,
+                    index = c("state", "year"),
+                    r_max = 6,
+                    force = "two-way")
+```
+
+The function prints a table of IC1, IC2, IC3 (Bai & Ng 2002), IC(BIC), and PC
+(Bai 2009) criteria for each $r$.  The recommended criterion for
+small-to-moderate panels ($\min(N,T) < 60$) is **IC(BIC)**, which imposes a
+stronger $\log(NT)$ penalty and avoids overselection.
+
+---
+
+## Asymptotic Bias Correction
+
+In large balanced panels, the IFE estimator has an asymptotic bias of order
+$1/N + 1/T$.  Setting `bias_corr = TRUE` applies the analytical correction
+from Bai (2009) Section 7:
+
+$$\hat{\beta}^\dagger = \hat{\beta} - \hat{B}/N - \hat{C}/T$$
+
+```{r bias_static}
+fit_bc <- ife(sales ~ price, data = cigar,
+              index     = c("state", "year"),
+              r         = 2,
+              se        = "standard",
+              bias_corr = TRUE)
+print(fit_bc)
+```
+
+The bias correction is most important when $T/N$ is non-negligible (e.g.,
+$T/N > 0.3$).  For the cigar panel ($N = 46$, $T = 30$, $T/N \approx 0.65$)
+the correction shifts the price coefficient from $-0.524$ to $-0.531$.
+
+### Dynamic IFE (Moon & Weidner 2017)
+
+When regressors include **lagged dependent variables** or variables correlated
+with past errors (predetermined, not strictly exogenous), use
+`method = "dynamic"`.  This applies the double projection $M_\Lambda M_F$
+in the SVD loop and the three-term bias correction from Moon & Weidner (2017):
+
+$$\hat{\beta}^* = \hat{\beta} + \hat{W}^{-1}\left(\frac{\hat{B}_1}{T} + \frac{\hat{B}_2}{N} + \frac{\hat{B}_3}{T}\right)$$
+
+where $\hat{B}_1$ captures Nickell-type dynamic bias.
+
+```{r bias_dynamic}
+fit_dyn <- ife(sales ~ price, data = cigar,
+               index     = c("state", "year"),
+               r         = 2,
+               se        = "standard",
+               method    = "dynamic",
+               bias_corr = TRUE,
+               M1        = 1L)
+print(fit_dyn)
+```
+
+For `price` (approximately exogenous), $B_1/T \approx 0$, confirming that the
+static and dynamic estimates coincide.
+
+---
+
+## Comparison with TWFE
+
+Setting `r=0` reduces `ife()` to the standard two-way FE estimator and
+produces results identical to `lm()` with unit and time dummies:
+
+```{r twfe_compare}
+fit0 <- ife(sales ~ price, data = cigar,
+            index = c("state", "year"), r = 0)
+
+# Manual two-way demeaning
+cigar$y_dm <- cigar$sales  - ave(cigar$sales,  cigar$state) -
+                              ave(cigar$sales,  cigar$year)  + mean(cigar$sales)
+cigar$x_dm <- cigar$price  - ave(cigar$price,  cigar$state) -
+                              ave(cigar$price,  cigar$year)  + mean(cigar$price)
+lm0 <- lm(y_dm ~ x_dm - 1, data = cigar)
+
+cat(sprintf("ife (r=0): %.6f\n", fit0$coef["price"]))
+cat(sprintf("lm TWFE:  %.6f\n", coef(lm0)["x_dm"]))
+cat(sprintf("diff:     %.2e\n",
+            abs(fit0$coef["price"] - coef(lm0)["x_dm"])))
+```
+
+The difference is at machine precision ($\approx 10^{-15}$), confirming
+that `r=0` is algebraically equivalent to TWFE.
+
+---
+
+## References
+
+Bai, J. (2009). Panel data models with interactive fixed effects.
+*Econometrica*, 77(4), 1229--1279. doi:[10.3982/ECTA6135](https://doi.org/10.3982/ECTA6135)
+
+Bai, J. and Ng, S. (2002). Determining the number of factors in approximate
+factor models. *Econometrica*, 70(1), 191--221.
+doi:[10.1111/1468-0262.00273](https://doi.org/10.1111/1468-0262.00273)
+
+Moon, H.R. and Weidner, M. (2017). Dynamic linear panel regression models
+with interactive fixed effects. *Econometric Theory*, 33, 158--195.
+doi:[10.1017/S0266466615000328](https://doi.org/10.1017/S0266466615000328)
+
+Baltagi, B.H. (1995). *Econometric Analysis of Panel Data*. Wiley.
