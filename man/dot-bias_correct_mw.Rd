@@ -38,9 +38,11 @@
 \value{
 list:
 beta_bc  p-vector: bias-corrected coefficients
-B1_hat   p-vector: dynamic bias term (pre-multiplied by D0_inv; scaled by 1/(NT))
-B2_hat   p-vector: cross-section heteroscedasticity bias (same as Bai B_hat)
-B3_hat   p-vector: time heteroscedasticity bias (same as Bai C_hat)
+B1_hat   p-vector: dynamic-term contribution  W^-1 B1/T  (additive)
+B2_hat   p-vector: cross-section-het contribution  W^-1 B2/N
+B3_hat   p-vector: time-het contribution  W^-1 B3/T
+The decomposition identity beta_bc = beta + B1_hat + B2_hat + B3_hat
+holds exactly (all scalings and the W^-1 weighting are inside).
 }
 \description{
 Applies the three-term asymptotic bias correction from Moon and

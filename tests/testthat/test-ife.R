@@ -101,6 +101,14 @@ test_that("static bias correction produces corrected coef ~-0.5309", {
   expect_true(fit_bc$bias_applied)
   expect_false(is.null(fit_bc$B_hat))
   expect_false(is.null(fit_bc$C_hat))
+
+  # Decomposition identity (Bai sign convention, as printed by print.ife):
+  #   corrected = raw - B_hat/N - C_hat/T  must hold exactly
+  expect_equal(unname(fit_bc$coef["price"]),
+               unname(fit_bc$coef_raw["price"] -
+                      fit_bc$B_hat["price"] / fit_bc$N -
+                      fit_bc$C_hat["price"] / fit_bc$T),
+               tolerance = 1e-10)
 })
 
 # ==============================================================================
@@ -130,8 +138,17 @@ test_that("dynamic bias correction produces corrected coef ~-0.5343", {
   expect_false(is.null(fit_dbc$B1_hat))
   expect_false(is.null(fit_dbc$B2_hat))
   expect_false(is.null(fit_dbc$B3_hat))
-  # B1 near zero (price is approximately exogenous in cigar data)
-  expect_lt(abs(fit_dbc$B1_hat["price"] / fit_dbc$T), 0.01)
+  # B1 contribution near zero (price is approximately exogenous in cigar data);
+  # B*_hat are the additive contributions W^{-1}B_l (scalings included)
+  expect_lt(abs(fit_dbc$B1_hat["price"]), 0.01)
+
+  # Decomposition identity: corrected = raw + B1 + B2 + B3, exactly
+  expect_equal(unname(fit_dbc$coef["price"]),
+               unname(fit_dbc$coef_raw["price"] +
+                      fit_dbc$B1_hat["price"] +
+                      fit_dbc$B2_hat["price"] +
+                      fit_dbc$B3_hat["price"]),
+               tolerance = 1e-10)
 })
 
 # ==============================================================================
@@ -181,4 +198,40 @@ test_that("method='static' explicit equals default to machine precision", {
   expect_equal(unname(fit_default$coef["price"]),
                unname(fit_explicit$coef["price"]),
                tolerance = 1e-10)
+})
+
+
+# ============================================================================
+# Test B_TT_N — T > N synthetic panel: F'F/T = I_r guaranteed after fix
+# ============================================================================
+test_that("B_TT_N: T > N balanced panel — factor normalisation F'F/T = I_r", {
+  skip_on_cran()
+
+  set.seed(42L)
+  N_small <- 10L; T_big <- 30L; r_true <- 2L; beta_true <- 0.5
+
+  F_true <- matrix(rnorm(T_big * r_true), T_big, r_true)
+  L_true <- matrix(rnorm(N_small * r_true), N_small, r_true)
+  X_mat  <- matrix(rnorm(T_big * N_small), T_big, N_small)
+  Y_mat  <- beta_true * X_mat +
+            F_true %*% t(L_true) +
+            matrix(rnorm(T_big * N_small, sd = 0.5), T_big, N_small)
+
+  df <- data.frame(
+    unit = rep(seq_len(N_small), each = T_big),
+    time = rep(seq_len(T_big),   times = N_small),
+    Y    = as.vector(Y_mat),
+    X    = as.vector(X_mat)
+  )
+
+  fit <- ife(Y ~ X, data = df, index = c("unit", "time"),
+             r = r_true, force = "none", se = "standard")
+
+  # F'F/T = I_r must hold exactly (to 1e-6) after the SVD renormalisation
+  FtF <- crossprod(fit$F_hat) / T_big
+  expect_lt(max(abs(FtF - diag(r_true))), 1e-6)
+
+  expect_true(fit$converged)
+  expect_true(is.finite(fit$coef["X"]))
+  expect_lt(abs(fit$coef["X"] - beta_true), 0.30)
 })

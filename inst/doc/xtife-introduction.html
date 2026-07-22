@@ -12,9 +12,9 @@
 
 <meta name="author" content="Binzhi Chen" />
 
-<meta name="date" content="2026-04-21" />
+<meta name="date" content="2026-07-22" />
 
-<title>Interactive Fixed Effects with xtife</title>
+<title>Interactive Fixed Effects for Balanced and Unbalanced Panels</title>
 
 
 <style type="text/css">
@@ -324,267 +324,956 @@ code > span.er { color: #a61717; background-color: #e3d2d2; }
 
 
 
-<h1 class="title toc-ignore">Interactive Fixed Effects with xtife</h1>
+<h1 class="title toc-ignore">Interactive Fixed Effects for Balanced and Unbalanced Panels</h1>
 <h4 class="author">Binzhi Chen</h4>
-<h4 class="date">2026-04-21</h4>
+<h4 class="date">2026-07-22</h4>
 
 
-
-<div id="introduction" class="section level2">
-<h2>Introduction</h2>
-<p>Standard two-way fixed effects (TWFE) estimators control for unobserved unit-specific and time-specific heterogeneity through additive fixed effects <span class="math inline">\(\alpha_i\)</span> and <span class="math inline">\(\xi_t\)</span>. In many empirical settings, however, unobserved confounders interact: a unit’s exposure to a common shock depends on its own latent characteristics.</p>
-<p>The <strong>Interactive Fixed Effects (IFE)</strong> model of Bai (2009) generalises TWFE by replacing the additive error structure with a factor model:</p>
-<p><span class="math display">\[y_{it} = \alpha_i + \xi_t + X_{it}'\beta + \lambda_i'F_t + u_{it}\]</span></p>
-<p>where <span class="math inline">\(F_t \in \mathbb{R}^r\)</span> are common factors and <span class="math inline">\(\lambda_i \in \mathbb{R}^r\)</span> are unit-specific loadings. The term <span class="math inline">\(\lambda_i'F_t\)</span> captures unobserved heterogeneity that varies over both dimensions simultaneously.</p>
-<p><code>xtife</code> provides a pure base-R implementation with:</p>
+<div id="TOC">
 <ul>
-<li><strong>Analytical standard errors</strong>: homoskedastic, HC1 robust, cluster-robust by unit</li>
-<li><strong>Asymptotic bias correction</strong>: Bai (2009) static and Moon &amp; Weidner (2017) dynamic</li>
-<li><strong>Factor number selection</strong>: information criteria from Bai &amp; Ng (2002) and Bai (2009)</li>
+<li><a href="#introduction"><span class="toc-section-number">1</span> Introduction</a><ul>
+<li><a href="#why-interactive-fixed-effects"><span class="toc-section-number">1.1</span> Why interactive fixed effects?</a></li>
+<li><a href="#the-ife-model"><span class="toc-section-number">1.2</span> The IFE model</a></li>
+<li><a href="#what-xtife-provides"><span class="toc-section-number">1.3</span> What <code>xtife</code> provides</a></li>
+</ul></li>
+<li><a href="#balanced-panel-ife"><span class="toc-section-number">2</span> Balanced Panel IFE</a><ul>
+<li><a href="#data"><span class="toc-section-number">2.1</span> Data</a></li>
+<li><a href="#quick-start"><span class="toc-section-number">2.2</span> Quick start</a></li>
+<li><a href="#estimation-algorithm"><span class="toc-section-number">2.3</span> Estimation algorithm</a></li>
+<li><a href="#standard-error-types"><span class="toc-section-number">2.4</span> Standard error types</a></li>
+<li><a href="#comparison-with-twfe"><span class="toc-section-number">2.5</span> Comparison with TWFE</a></li>
+<li><a href="#factor-number-selection"><span class="toc-section-number">2.6</span> Factor number selection</a></li>
+<li><a href="#asymptotic-bias-correction-balanced-panel"><span class="toc-section-number">2.7</span> Asymptotic bias correction (balanced panel)</a><ul>
+<li><a href="#static-regressors-bai-2009"><span class="toc-section-number">2.7.1</span> Static regressors — Bai (2009)</a></li>
+<li><a href="#dynamic-regressors-moon-and-weidner-2017"><span class="toc-section-number">2.7.2</span> Dynamic regressors — Moon and Weidner (2017)</a></li>
+</ul></li>
+</ul></li>
+<li><a href="#unbalanced-panel-ife"><span class="toc-section-number">3</span> Unbalanced Panel IFE</a><ul>
+<li><a href="#motivation"><span class="toc-section-number">3.1</span> Motivation</a></li>
+<li><a href="#the-unbalanced-ife-model"><span class="toc-section-number">3.2</span> The unbalanced IFE model</a><ul>
+<li><a href="#identification"><span class="toc-section-number">3.2.1</span> Identification</a></li>
+<li><a href="#additive-fixed-effects-via-force"><span class="toc-section-number">3.2.2</span> Additive fixed effects via <code>force</code></a></li>
+</ul></li>
+<li><a href="#quick-start-with-unbalanced-data"><span class="toc-section-number">3.3</span> Quick start with unbalanced data</a></li>
+<li><a href="#estimation-algorithm-1"><span class="toc-section-number">3.4</span> Estimation algorithm</a><ul>
+<li><a href="#outer-alternating-maximisation-am-loop"><span class="toc-section-number">3.4.1</span> Outer alternating-maximisation (AM) loop</a></li>
+<li><a href="#em-inner-loop-bai-2009-appendix-b-used-within-each-am-iteration"><span class="toc-section-number">3.4.2</span> EM inner loop (Bai 2009, Appendix B) — used within each AM iteration</a></li>
+<li><a href="#initialisation"><span class="toc-section-number">3.4.3</span> Initialisation</a></li>
+</ul></li>
+<li><a href="#analytical-standard-errors"><span class="toc-section-number">3.5</span> Analytical standard errors</a></li>
+<li><a href="#factor-number-selection-1"><span class="toc-section-number">3.6</span> Factor number selection</a></li>
+<li><a href="#analytical-bias-correction"><span class="toc-section-number">3.7</span> Analytical bias correction</a><ul>
+<li><a href="#strictly-exogenous-regressors-exog-strict"><span class="toc-section-number">3.7.1</span> Strictly exogenous regressors (<code>exog = &quot;strict&quot;</code>)</a></li>
+<li><a href="#weakly-exogenous-regressors-exog-weak"><span class="toc-section-number">3.7.2</span> Weakly exogenous regressors (<code>exog = &quot;weak&quot;</code>)</a></li>
+</ul></li>
+<li><a href="#balanced-vs-unbalanced-on-the-same-data"><span class="toc-section-number">3.8</span> Balanced vs unbalanced on the same data</a></li>
+</ul></li>
+<li><a href="#input-validation-and-common-errors"><span class="toc-section-number">4</span> Input validation and common errors</a></li>
+<li><a href="#quick-reference-argument-tables"><span class="toc-section-number">5</span> Quick reference: argument tables</a><ul>
+<li><a href="#ife-balanced-panel"><span class="toc-section-number">5.1</span> <code>ife()</code> — balanced panel</a></li>
+<li><a href="#ife_unbalanced-unbalanced-panel"><span class="toc-section-number">5.2</span> <code>ife_unbalanced()</code> — unbalanced panel</a></li>
+</ul></li>
+<li><a href="#references"><span class="toc-section-number">6</span> References</a></li>
 </ul>
-<hr />
 </div>
-<div id="quick-start" class="section level2">
-<h2>Quick Start</h2>
-<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb1-1" data-line-number="1"><span class="kw">library</span>(xtife)</a>
-<a class="sourceLine" id="cb1-2" data-line-number="2"><span class="kw">data</span>(cigar)</a>
-<a class="sourceLine" id="cb1-3" data-line-number="3"></a>
-<a class="sourceLine" id="cb1-4" data-line-number="4"><span class="co"># Fit IFE with r=2 factors, two-way FE, cluster-robust SE</span></a>
-<a class="sourceLine" id="cb1-5" data-line-number="5">fit &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
-<a class="sourceLine" id="cb1-6" data-line-number="6">           <span class="dt">index  =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>),</a>
-<a class="sourceLine" id="cb1-7" data-line-number="7">           <span class="dt">r      =</span> <span class="dv">2</span>,</a>
-<a class="sourceLine" id="cb1-8" data-line-number="8">           <span class="dt">force  =</span> <span class="st">&quot;two-way&quot;</span>,</a>
-<a class="sourceLine" id="cb1-9" data-line-number="9">           <span class="dt">se     =</span> <span class="st">&quot;cluster&quot;</span>)</a>
-<a class="sourceLine" id="cb1-10" data-line-number="10"><span class="kw">print</span>(fit)</a>
-<a class="sourceLine" id="cb1-11" data-line-number="11"><span class="co">#&gt; </span></a>
-<a class="sourceLine" id="cb1-12" data-line-number="12"><span class="co">#&gt; Interactive Fixed Effects (Bai 2009, Econometrica)</span></a>
-<a class="sourceLine" id="cb1-13" data-line-number="13"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb1-14" data-line-number="14"><span class="co">#&gt; Panel    : N = 46 units, T = 30 periods</span></a>
-<a class="sourceLine" id="cb1-15" data-line-number="15"><span class="co">#&gt; Factors  : r = 2</span></a>
-<a class="sourceLine" id="cb1-16" data-line-number="16"><span class="co">#&gt; Force    : two-way fixed effects</span></a>
-<a class="sourceLine" id="cb1-17" data-line-number="17"><span class="co">#&gt; SE type  : cluster (by state)</span></a>
-<a class="sourceLine" id="cb1-18" data-line-number="18"><span class="co">#&gt; Outcome  : sales</span></a>
-<a class="sourceLine" id="cb1-19" data-line-number="19"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb1-20" data-line-number="20"><span class="co">#&gt;       Estimate Std.Error t.value Pr(&gt;|t|)             95% CI    </span></a>
-<a class="sourceLine" id="cb1-21" data-line-number="21"><span class="co">#&gt; price  -0.5242    0.0802 -6.5333   0.0000 [-0.6816, -0.3667] ***</span></a>
-<a class="sourceLine" id="cb1-22" data-line-number="22"><span class="co">#&gt; ---</span></a>
-<a class="sourceLine" id="cb1-23" data-line-number="23"><span class="co">#&gt; Signif. codes: *** &lt;0.01  ** &lt;0.05  * &lt;0.1</span></a>
-<a class="sourceLine" id="cb1-24" data-line-number="24"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb1-25" data-line-number="25"><span class="co">#&gt; sigma^2  : 18.456076 | df = 1157</span></a>
-<a class="sourceLine" id="cb1-26" data-line-number="26"><span class="co">#&gt; Converged: YES | Iterations: 10</span></a>
-<a class="sourceLine" id="cb1-27" data-line-number="27"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb1-28" data-line-number="28"><span class="co">#&gt; Factor selection criteria at r = 2 [IC1-3: Bai &amp; Ng 2002; IC_bic/PC: Bai 2009]:</span></a>
-<a class="sourceLine" id="cb1-29" data-line-number="29"><span class="co">#&gt;   IC1 =   3.2347  |  IC2 =   3.2900  |  IC3 =   3.1421</span></a>
-<a class="sourceLine" id="cb1-30" data-line-number="30"><span class="co">#&gt;   PC  =  36.8093  |  IC (BIC-style) =   4.2661</span></a>
-<a class="sourceLine" id="cb1-31" data-line-number="31"><span class="co">#&gt;   -&gt; Run ife_select_r() to compare criteria across r = 0, 1, ..., r_max</span></a>
-<a class="sourceLine" id="cb1-32" data-line-number="32"><span class="co">#&gt;      and identify the IC-minimising number of factors.</span></a></code></pre></div>
-<p>The output shows the coefficient table, convergence status, factor selection criteria, and (when enabled) bias correction details.</p>
-<p>Access individual components:</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb2-1" data-line-number="1"><span class="co"># Estimated coefficients</span></a>
-<a class="sourceLine" id="cb2-2" data-line-number="2">fit<span class="op">$</span>coef</a>
-<a class="sourceLine" id="cb2-3" data-line-number="3"><span class="co">#&gt;      price </span></a>
-<a class="sourceLine" id="cb2-4" data-line-number="4"><span class="co">#&gt; -0.5241574</span></a>
-<a class="sourceLine" id="cb2-5" data-line-number="5"></a>
-<a class="sourceLine" id="cb2-6" data-line-number="6"><span class="co"># Standard errors</span></a>
-<a class="sourceLine" id="cb2-7" data-line-number="7">fit<span class="op">$</span>se</a>
-<a class="sourceLine" id="cb2-8" data-line-number="8"><span class="co">#&gt;     price </span></a>
-<a class="sourceLine" id="cb2-9" data-line-number="9"><span class="co">#&gt; 0.0802281</span></a>
-<a class="sourceLine" id="cb2-10" data-line-number="10"></a>
-<a class="sourceLine" id="cb2-11" data-line-number="11"><span class="co"># p-values</span></a>
-<a class="sourceLine" id="cb2-12" data-line-number="12">fit<span class="op">$</span>pval</a>
-<a class="sourceLine" id="cb2-13" data-line-number="13"><span class="co">#&gt;        price </span></a>
-<a class="sourceLine" id="cb2-14" data-line-number="14"><span class="co">#&gt; 9.616369e-11</span></a>
-<a class="sourceLine" id="cb2-15" data-line-number="15"></a>
-<a class="sourceLine" id="cb2-16" data-line-number="16"><span class="co"># 95% confidence intervals</span></a>
-<a class="sourceLine" id="cb2-17" data-line-number="17">fit<span class="op">$</span>ci</a>
-<a class="sourceLine" id="cb2-18" data-line-number="18"><span class="co">#&gt;         CI.lower   CI.upper</span></a>
-<a class="sourceLine" id="cb2-19" data-line-number="19"><span class="co">#&gt; price -0.6815663 -0.3667486</span></a>
-<a class="sourceLine" id="cb2-20" data-line-number="20"></a>
-<a class="sourceLine" id="cb2-21" data-line-number="21"><span class="co"># Estimated factors (T x r matrix)</span></a>
-<a class="sourceLine" id="cb2-22" data-line-number="22"><span class="kw">dim</span>(fit<span class="op">$</span>F_hat)</a>
-<a class="sourceLine" id="cb2-23" data-line-number="23"><span class="co">#&gt; [1] 30  2</span></a>
-<a class="sourceLine" id="cb2-24" data-line-number="24"></a>
-<a class="sourceLine" id="cb2-25" data-line-number="25"><span class="co"># Estimated loadings (N x r matrix)</span></a>
-<a class="sourceLine" id="cb2-26" data-line-number="26"><span class="kw">dim</span>(fit<span class="op">$</span>Lambda_hat)</a>
-<a class="sourceLine" id="cb2-27" data-line-number="27"><span class="co">#&gt; [1] 46  2</span></a></code></pre></div>
-<hr />
+
+<div id="introduction" class="section level1">
+<h1><span class="header-section-number">1</span> Introduction</h1>
+<div id="why-interactive-fixed-effects" class="section level2">
+<h2><span class="header-section-number">1.1</span> Why interactive fixed effects?</h2>
+<p>Standard two-way fixed effects (TWFE) controls for unobserved heterogeneity through an additive structure:</p>
+<p><span class="math display">\[y_{it} = \alpha_i + \xi_t + X_{it}'\beta + u_{it}\]</span></p>
+<p>The unit effect <span class="math inline">\(\alpha_i\)</span> absorbs any time-invariant unit characteristic; the time effect <span class="math inline">\(\xi_t\)</span> absorbs any unit-invariant time shock. This works well when heterogeneous responses to common shocks are negligible.</p>
+<p>Many empirical settings violate this assumption. Consider:</p>
+<ul>
+<li><strong>Globalisation shocks</strong>: countries are exposed differently depending on their trade openness (a unit characteristic that interacts with a common world-demand shock).</li>
+<li><strong>Monetary policy</strong>: firms with different financial leverage respond asymmetrically to a common interest-rate change.</li>
+<li><strong>COVID-19</strong>: regional outcomes depend on a national shock weighted by pre-existing health-system capacity.</li>
+</ul>
+<p>In each case, the unobserved confounder has the product form <span class="math inline">\(\lambda_i' F_t\)</span>: a unit-specific loading <span class="math inline">\(\lambda_i\)</span> multiplied by a common factor <span class="math inline">\(F_t\)</span>. If <span class="math inline">\(X_{it}\)</span> is correlated with <span class="math inline">\(\lambda_i' F_t\)</span>, TWFE is inconsistent even as <span class="math inline">\(N, T \to \infty\)</span>.</p>
 </div>
-<div id="standard-error-types" class="section level2">
-<h2>Standard Error Types</h2>
-<p>Three SE estimators are available via the <code>se</code> argument:</p>
+<div id="the-ife-model" class="section level2">
+<h2><span class="header-section-number">1.2</span> The IFE model</h2>
+<p>Bai (2009) proposes replacing the additive error structure with:</p>
+<p><span class="math display">\[y_{it} = \alpha_i + \xi_t + X_{it}'\beta + \lambda_i' F_t + u_{it}
+\qquad (1)\]</span></p>
+<p>where:</p>
+<ul>
+<li><span class="math inline">\(\beta \in \mathbb{R}^p\)</span>: structural parameters of interest,</li>
+<li><span class="math inline">\(F_t \in \mathbb{R}^r\)</span>: common factors (<span class="math inline">\(T \times r\)</span> matrix <span class="math inline">\(\hat{F}\)</span>, normalised <span class="math inline">\(\hat{F}'\hat{F}/T = I_r\)</span>),</li>
+<li><span class="math inline">\(\lambda_i \in \mathbb{R}^r\)</span>: unit-specific factor loadings (<span class="math inline">\(N \times r\)</span> matrix <span class="math inline">\(\hat{\Lambda}\)</span>),</li>
+<li><span class="math inline">\(u_{it}\)</span>: idiosyncratic error with <span class="math inline">\(\mathbb{E}[u_{it} \mid X, F, \Lambda] = 0\)</span>.</li>
+</ul>
+<p>The <span class="math inline">\(r\)</span> interactive terms <span class="math inline">\(\lambda_{ik} F_{kt}\)</span> generalise both additive unit effects (<span class="math inline">\(r=1\)</span>, <span class="math inline">\(F_t = 1\)</span>) and additive time effects (<span class="math inline">\(r=1\)</span>, <span class="math inline">\(\lambda_i = 1\)</span>). With <span class="math inline">\(r\)</span> unrestricted, (1) subsumes TWFE as the special case <span class="math inline">\(r = 0\)</span>.</p>
+</div>
+<div id="what-xtife-provides" class="section level2">
+<h2><span class="header-section-number">1.3</span> What <code>xtife</code> provides</h2>
+<p><code>xtife</code> is a pure base-R package (no compiled code, no external dependencies) offering:</p>
 <table>
 <colgroup>
-<col width="35%"></col>
-<col width="26%"></col>
-<col width="38%"></col>
+<col width="33%"></col>
+<col width="33%"></col>
+<col width="33%"></col>
 </colgroup>
 <thead>
 <tr class="header">
-<th><code>se =</code></th>
-<th>Formula</th>
-<th>When to use</th>
+<th>Feature</th>
+<th>Function</th>
+<th>Reference</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Balanced IFE: analytical SEs</td>
+<td><code>ife()</code></td>
+<td>Bai (2009)</td>
+</tr>
+<tr class="even">
+<td>Balanced IFE: static bias correction</td>
+<td><code>ife(..., bias_corr=TRUE)</code></td>
+<td>Bai (2009, §7)</td>
+</tr>
+<tr class="odd">
+<td>Balanced IFE: dynamic regressors</td>
+<td><code>ife(..., method=&quot;dynamic&quot;)</code></td>
+<td>Moon &amp; Weidner (2017)</td>
+</tr>
+<tr class="even">
+<td>Factor number selection (balanced)</td>
+<td><code>ife_select_r()</code></td>
+<td>Bai &amp; Ng (2002); Bai (2009)</td>
+</tr>
+<tr class="odd">
+<td>Unbalanced IFE: estimation &amp; analytical inference</td>
+<td><code>ife_unbalanced()</code></td>
+<td>Su, Wang &amp; Wang (2025); Bai (2009); Bai &amp; Ng (2021)</td>
+</tr>
+<tr class="even">
+<td>Unbalanced IFE: additive FE (<code>force</code>)</td>
+<td><code>ife_unbalanced(force=)</code></td>
+<td>Su, Wang &amp; Wang (2025)</td>
+</tr>
+<tr class="odd">
+<td>Unbalanced IFE: factor selection</td>
+<td><code>ife_select_r_unb()</code></td>
+<td>Su, Wang &amp; Wang (2025); Bai &amp; Ng (2021)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+</div>
+</div>
+<div id="balanced-panel-ife" class="section level1">
+<h1><span class="header-section-number">2</span> Balanced Panel IFE</h1>
+<div id="data" class="section level2">
+<h2><span class="header-section-number">2.1</span> Data</h2>
+<p>The package includes the <code>cigar</code> dataset: 46 US states <span class="math inline">\(\times\)</span> 30 years (1963–1992) of cigarette sales and prices from Baltagi (1995).</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb1-1" data-line-number="1"><span class="kw">library</span>(xtife)</a>
+<a class="sourceLine" id="cb1-2" data-line-number="2"><span class="kw">data</span>(cigar)</a>
+<a class="sourceLine" id="cb1-3" data-line-number="3"><span class="kw">dim</span>(cigar)</a>
+<a class="sourceLine" id="cb1-4" data-line-number="4"><span class="co">#&gt; [1] 1380    9</span></a>
+<a class="sourceLine" id="cb1-5" data-line-number="5"><span class="kw">head</span>(cigar[, <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>, <span class="st">&quot;sales&quot;</span>, <span class="st">&quot;price&quot;</span>)], <span class="dv">3</span>)</a>
+<a class="sourceLine" id="cb1-6" data-line-number="6"><span class="co">#&gt;   state year sales price</span></a>
+<a class="sourceLine" id="cb1-7" data-line-number="7"><span class="co">#&gt; 1     1   63  93.9  28.6</span></a>
+<a class="sourceLine" id="cb1-8" data-line-number="8"><span class="co">#&gt; 2     1   64  95.4  29.8</span></a>
+<a class="sourceLine" id="cb1-9" data-line-number="9"><span class="co">#&gt; 3     1   65  98.5  29.8</span></a></code></pre></div>
+<p>The panel is balanced: every state appears in every year.</p>
+</div>
+<div id="quick-start" class="section level2">
+<h2><span class="header-section-number">2.2</span> Quick start</h2>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb2-1" data-line-number="1">fit &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price,</a>
+<a class="sourceLine" id="cb2-2" data-line-number="2">           <span class="dt">data  =</span> cigar,</a>
+<a class="sourceLine" id="cb2-3" data-line-number="3">           <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>),</a>
+<a class="sourceLine" id="cb2-4" data-line-number="4">           <span class="dt">r     =</span> <span class="dv">2</span>,</a>
+<a class="sourceLine" id="cb2-5" data-line-number="5">           <span class="dt">force =</span> <span class="st">&quot;two-way&quot;</span>,</a>
+<a class="sourceLine" id="cb2-6" data-line-number="6">           <span class="dt">se    =</span> <span class="st">&quot;cluster&quot;</span>)</a>
+<a class="sourceLine" id="cb2-7" data-line-number="7"><span class="kw">print</span>(fit)</a>
+<a class="sourceLine" id="cb2-8" data-line-number="8"><span class="co">#&gt; </span></a>
+<a class="sourceLine" id="cb2-9" data-line-number="9"><span class="co">#&gt; Interactive Fixed Effects (Bai 2009, Econometrica)</span></a>
+<a class="sourceLine" id="cb2-10" data-line-number="10"><span class="co">#&gt; -------------------------------------------------------</span></a>
+<a class="sourceLine" id="cb2-11" data-line-number="11"><span class="co">#&gt; Panel    : N = 46 units, T = 30 periods</span></a>
+<a class="sourceLine" id="cb2-12" data-line-number="12"><span class="co">#&gt; Factors  : r = 2</span></a>
+<a class="sourceLine" id="cb2-13" data-line-number="13"><span class="co">#&gt; Force    : two-way fixed effects</span></a>
+<a class="sourceLine" id="cb2-14" data-line-number="14"><span class="co">#&gt; SE type  : cluster (by state)</span></a>
+<a class="sourceLine" id="cb2-15" data-line-number="15"><span class="co">#&gt; Outcome  : sales</span></a>
+<a class="sourceLine" id="cb2-16" data-line-number="16"><span class="co">#&gt; -------------------------------------------------------</span></a>
+<a class="sourceLine" id="cb2-17" data-line-number="17"><span class="co">#&gt;       Estimate Std.Error t.value Pr(&gt;|t|)             95% CI    </span></a>
+<a class="sourceLine" id="cb2-18" data-line-number="18"><span class="co">#&gt; price  -0.5242    0.0802 -6.5333   0.0000 [-0.6816, -0.3667] ***</span></a>
+<a class="sourceLine" id="cb2-19" data-line-number="19"><span class="co">#&gt; ---</span></a>
+<a class="sourceLine" id="cb2-20" data-line-number="20"><span class="co">#&gt; Signif. codes: *** &lt;0.01  ** &lt;0.05  * &lt;0.1</span></a>
+<a class="sourceLine" id="cb2-21" data-line-number="21"><span class="co">#&gt; -------------------------------------------------------</span></a>
+<a class="sourceLine" id="cb2-22" data-line-number="22"><span class="co">#&gt; sigma^2  : 18.456076 | df = 1157</span></a>
+<a class="sourceLine" id="cb2-23" data-line-number="23"><span class="co">#&gt; Converged: YES | Iterations: 10</span></a>
+<a class="sourceLine" id="cb2-24" data-line-number="24"><span class="co">#&gt; -------------------------------------------------------</span></a>
+<a class="sourceLine" id="cb2-25" data-line-number="25"><span class="co">#&gt; Factor selection criteria at r = 2 [IC1-3: Bai &amp; Ng 2002; IC_bic/PC: Bai 2009]:</span></a>
+<a class="sourceLine" id="cb2-26" data-line-number="26"><span class="co">#&gt;   IC1 =   3.2347  |  IC2 =   3.2900  |  IC3 =   3.1421</span></a>
+<a class="sourceLine" id="cb2-27" data-line-number="27"><span class="co">#&gt;   PC  =  36.8093  |  IC (BIC-style) =   4.2661</span></a>
+<a class="sourceLine" id="cb2-28" data-line-number="28"><span class="co">#&gt;   -&gt; Run ife_select_r() to compare criteria across r = 0, 1, ..., r_max</span></a>
+<a class="sourceLine" id="cb2-29" data-line-number="29"><span class="co">#&gt;      and identify the IC-minimising number of factors.</span></a></code></pre></div>
+<p>The <code>force</code> argument controls additive fixed effects: <code>&quot;none&quot;</code> | <code>&quot;unit&quot;</code> | <code>&quot;time&quot;</code> | <code>&quot;two-way&quot;</code> (default).</p>
+<p>Key output fields:</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb3-1" data-line-number="1">fit<span class="op">$</span>coef          <span class="co"># named coefficient vector</span></a>
+<a class="sourceLine" id="cb3-2" data-line-number="2"><span class="co">#&gt;      price </span></a>
+<a class="sourceLine" id="cb3-3" data-line-number="3"><span class="co">#&gt; -0.5241574</span></a>
+<a class="sourceLine" id="cb3-4" data-line-number="4">fit<span class="op">$</span>se            <span class="co"># standard errors</span></a>
+<a class="sourceLine" id="cb3-5" data-line-number="5"><span class="co">#&gt;     price </span></a>
+<a class="sourceLine" id="cb3-6" data-line-number="6"><span class="co">#&gt; 0.0802281</span></a>
+<a class="sourceLine" id="cb3-7" data-line-number="7">fit<span class="op">$</span>ci            <span class="co"># 95% confidence intervals (matrix: coef x 2)</span></a>
+<a class="sourceLine" id="cb3-8" data-line-number="8"><span class="co">#&gt;         CI.lower   CI.upper</span></a>
+<a class="sourceLine" id="cb3-9" data-line-number="9"><span class="co">#&gt; price -0.6815663 -0.3667486</span></a>
+<a class="sourceLine" id="cb3-10" data-line-number="10">fit<span class="op">$</span>converged     <span class="co"># TRUE if outer loop converged</span></a>
+<a class="sourceLine" id="cb3-11" data-line-number="11"><span class="co">#&gt; [1] TRUE</span></a>
+<a class="sourceLine" id="cb3-12" data-line-number="12">fit<span class="op">$</span>n_iter        <span class="co"># number of outer iterations</span></a>
+<a class="sourceLine" id="cb3-13" data-line-number="13"><span class="co">#&gt; [1] 10</span></a>
+<a class="sourceLine" id="cb3-14" data-line-number="14"><span class="kw">dim</span>(fit<span class="op">$</span>F_hat)    <span class="co"># T x r estimated factors</span></a>
+<a class="sourceLine" id="cb3-15" data-line-number="15"><span class="co">#&gt; [1] 30  2</span></a>
+<a class="sourceLine" id="cb3-16" data-line-number="16"><span class="kw">dim</span>(fit<span class="op">$</span>Lambda_hat) <span class="co"># N x r estimated loadings</span></a>
+<a class="sourceLine" id="cb3-17" data-line-number="17"><span class="co">#&gt; [1] 46  2</span></a></code></pre></div>
+</div>
+<div id="estimation-algorithm" class="section level2">
+<h2><span class="header-section-number">2.3</span> Estimation algorithm</h2>
+<p>The Bai (2009) estimator alternates between two steps until convergence:</p>
+<p><strong>Step 1 — Factor extraction.</strong> Given <span class="math inline">\(\hat\beta\)</span>, form <span class="math inline">\(W_{it} = \ddot y_{it} - \ddot X_{it}'\hat\beta\)</span> (residuals after additive FE demeaning). The top-<span class="math inline">\(r\)</span> eigenvectors of <span class="math inline">\(WW'/NT\)</span> (scaled to satisfy <span class="math inline">\(\hat F' \hat F / T = I_r\)</span>) give <span class="math inline">\(\hat F\)</span>. The loadings follow by regression: <span class="math inline">\(\hat\Lambda = W'\hat F / T\)</span>.</p>
+<p><strong>Step 2 — Coefficient update.</strong> Project the demeaned regressors onto the orthogonal complement of <span class="math inline">\(\hat F\)</span>:</p>
+<p><span class="math display">\[\tilde X_{it} = \ddot X_{it} - \hat F_t (\hat F' \hat F)^{-1} \hat F' \ddot X_i\]</span></p>
+<p>Then <span class="math inline">\(\hat\beta = (\tilde X'\tilde X)^{-1}\tilde X'\ddot y\)</span> (Frisch-Waugh-Lovell).</p>
+<p>The outer loop converges when <span class="math inline">\(\max|\hat\beta^{(k+1)} - \hat\beta^{(k)}| &lt; \text{tol}\)</span> (default <span class="math inline">\(10^{-9}\)</span>).</p>
+</div>
+<div id="standard-error-types" class="section level2">
+<h2><span class="header-section-number">2.4</span> Standard error types</h2>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb4-1" data-line-number="1">fit_std &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
+<a class="sourceLine" id="cb4-2" data-line-number="2">               <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">se =</span> <span class="st">&quot;standard&quot;</span>)</a>
+<a class="sourceLine" id="cb4-3" data-line-number="3">fit_rob &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
+<a class="sourceLine" id="cb4-4" data-line-number="4">               <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">se =</span> <span class="st">&quot;robust&quot;</span>)</a>
+<a class="sourceLine" id="cb4-5" data-line-number="5">fit_cl  &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
+<a class="sourceLine" id="cb4-6" data-line-number="6">               <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">se =</span> <span class="st">&quot;cluster&quot;</span>)</a>
+<a class="sourceLine" id="cb4-7" data-line-number="7"></a>
+<a class="sourceLine" id="cb4-8" data-line-number="8"><span class="kw">data.frame</span>(</a>
+<a class="sourceLine" id="cb4-9" data-line-number="9">  <span class="dt">se_type =</span> <span class="kw">c</span>(<span class="st">&quot;standard&quot;</span>, <span class="st">&quot;robust (HC1)&quot;</span>, <span class="st">&quot;cluster&quot;</span>),</a>
+<a class="sourceLine" id="cb4-10" data-line-number="10">  <span class="dt">coef    =</span> <span class="kw">round</span>(<span class="kw">c</span>(fit_std<span class="op">$</span>coef, fit_rob<span class="op">$</span>coef, fit_cl<span class="op">$</span>coef), <span class="dv">5</span>),</a>
+<a class="sourceLine" id="cb4-11" data-line-number="11">  <span class="dt">se      =</span> <span class="kw">round</span>(<span class="kw">c</span>(fit_std<span class="op">$</span>se,   fit_rob<span class="op">$</span>se,   fit_cl<span class="op">$</span>se),   <span class="dv">5</span>),</a>
+<a class="sourceLine" id="cb4-12" data-line-number="12">  <span class="dt">t_stat  =</span> <span class="kw">round</span>(<span class="kw">c</span>(fit_std<span class="op">$</span>tstat, fit_rob<span class="op">$</span>tstat, fit_cl<span class="op">$</span>tstat), <span class="dv">3</span>)</a>
+<a class="sourceLine" id="cb4-13" data-line-number="13">)</a>
+<a class="sourceLine" id="cb4-14" data-line-number="14"><span class="co">#&gt;        se_type     coef      se  t_stat</span></a>
+<a class="sourceLine" id="cb4-15" data-line-number="15"><span class="co">#&gt; 1     standard -0.52416 0.03987 -13.146</span></a>
+<a class="sourceLine" id="cb4-16" data-line-number="16"><span class="co">#&gt; 2 robust (HC1) -0.52416 0.04510 -11.623</span></a>
+<a class="sourceLine" id="cb4-17" data-line-number="17"><span class="co">#&gt; 3      cluster -0.52416 0.08023  -6.533</span></a></code></pre></div>
+<p>All three use the sandwich formula <span class="math inline">\(\widehat{\mathrm{Var}}(\hat\beta) = A^{-1} B A^{-1}\)</span> where <span class="math inline">\(A = \tilde X'\tilde X\)</span> and:</p>
+<table>
+<colgroup>
+<col width="33%"></col>
+<col width="33%"></col>
+<col width="33%"></col>
+</colgroup>
+<thead>
+<tr class="header">
+<th><code>se=</code></th>
+<th><span class="math inline">\(B\)</span> matrix</th>
+<th>Degrees of freedom</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
 <td><code>&quot;standard&quot;</code></td>
-<td><span class="math inline">\(\hat{\sigma}^2 (\tilde{X}'\tilde{X})^{-1}\)</span></td>
-<td>Benchmark; assumes homoskedasticity</td>
+<td><span class="math inline">\(\hat\sigma^2 A\)</span></td>
+<td><span class="math inline">\(NT - p - r(N+T-r) - \text{FE dof}\)</span></td>
 </tr>
 <tr class="even">
 <td><code>&quot;robust&quot;</code></td>
-<td>HC1 sandwich</td>
-<td>Heteroskedasticity across <span class="math inline">\(it\)</span> cells</td>
+<td><span class="math inline">\(\sum_{it} \hat u_{it}^2 \tilde x_{it}\tilde x_{it}'\)</span> (HC1)</td>
+<td>same</td>
 </tr>
 <tr class="odd">
 <td><code>&quot;cluster&quot;</code></td>
-<td>Cluster-robust by unit <span class="math inline">\(i\)</span></td>
-<td>Serial correlation within units (most panels)</td>
+<td><span class="math inline">\(\sum_i \psi_i \psi_i'\)</span>, <span class="math inline">\(\psi_i = \sum_t \hat u_{it}\tilde x_{it}\)</span></td>
+<td>same</td>
 </tr>
 </tbody>
 </table>
-<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb3-1" data-line-number="1">fit_std &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
-<a class="sourceLine" id="cb3-2" data-line-number="2">               <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">se =</span> <span class="st">&quot;standard&quot;</span>)</a>
-<a class="sourceLine" id="cb3-3" data-line-number="3">fit_rob &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
-<a class="sourceLine" id="cb3-4" data-line-number="4">               <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">se =</span> <span class="st">&quot;robust&quot;</span>)</a>
-<a class="sourceLine" id="cb3-5" data-line-number="5">fit_cl  &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
-<a class="sourceLine" id="cb3-6" data-line-number="6">               <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">se =</span> <span class="st">&quot;cluster&quot;</span>)</a>
-<a class="sourceLine" id="cb3-7" data-line-number="7"></a>
-<a class="sourceLine" id="cb3-8" data-line-number="8"><span class="co"># Compare standard errors</span></a>
-<a class="sourceLine" id="cb3-9" data-line-number="9">se_table &lt;-<span class="st"> </span><span class="kw">data.frame</span>(</a>
-<a class="sourceLine" id="cb3-10" data-line-number="10">  <span class="dt">se_type  =</span> <span class="kw">c</span>(<span class="st">&quot;standard&quot;</span>, <span class="st">&quot;robust (HC1)&quot;</span>, <span class="st">&quot;cluster&quot;</span>),</a>
-<a class="sourceLine" id="cb3-11" data-line-number="11">  <span class="dt">coef     =</span> <span class="kw">c</span>(fit_std<span class="op">$</span>coef, fit_rob<span class="op">$</span>coef, fit_cl<span class="op">$</span>coef),</a>
-<a class="sourceLine" id="cb3-12" data-line-number="12">  <span class="dt">se       =</span> <span class="kw">c</span>(fit_std<span class="op">$</span>se,   fit_rob<span class="op">$</span>se,   fit_cl<span class="op">$</span>se),</a>
-<a class="sourceLine" id="cb3-13" data-line-number="13">  <span class="dt">t_stat   =</span> <span class="kw">c</span>(fit_std<span class="op">$</span>tstat, fit_rob<span class="op">$</span>tstat, fit_cl<span class="op">$</span>tstat)</a>
-<a class="sourceLine" id="cb3-14" data-line-number="14">)</a>
-<a class="sourceLine" id="cb3-15" data-line-number="15"><span class="kw">print</span>(se_table, <span class="dt">digits =</span> <span class="dv">4</span>, <span class="dt">row.names =</span> <span class="ot">FALSE</span>)</a>
-<a class="sourceLine" id="cb3-16" data-line-number="16"><span class="co">#&gt;       se_type    coef      se  t_stat</span></a>
-<a class="sourceLine" id="cb3-17" data-line-number="17"><span class="co">#&gt;      standard -0.5242 0.03987 -13.146</span></a>
-<a class="sourceLine" id="cb3-18" data-line-number="18"><span class="co">#&gt;  robust (HC1) -0.5242 0.04510 -11.623</span></a>
-<a class="sourceLine" id="cb3-19" data-line-number="19"><span class="co">#&gt;       cluster -0.5242 0.08023  -6.533</span></a></code></pre></div>
-<p>Cluster-robust SEs are typically larger (&gt;= robust &gt;= standard) because they account for serial dependence within units.</p>
-<hr />
-</div>
-<div id="selecting-the-number-of-factors" class="section level2">
-<h2>Selecting the Number of Factors</h2>
-<p>Use <code>ife_select_r()</code> to compare information criteria across candidate values of <span class="math inline">\(r\)</span>:</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb4-1" data-line-number="1"><span class="co"># Not run during package build (takes ~30 s on cigar data)</span></a>
-<a class="sourceLine" id="cb4-2" data-line-number="2">sel &lt;-<span class="st"> </span><span class="kw">ife_select_r</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
-<a class="sourceLine" id="cb4-3" data-line-number="3">                    <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>),</a>
-<a class="sourceLine" id="cb4-4" data-line-number="4">                    <span class="dt">r_max =</span> <span class="dv">6</span>,</a>
-<a class="sourceLine" id="cb4-5" data-line-number="5">                    <span class="dt">force =</span> <span class="st">&quot;two-way&quot;</span>)</a></code></pre></div>
-<p>The function prints a table of IC1, IC2, IC3 (Bai &amp; Ng 2002), IC(BIC), and PC (Bai 2009) criteria for each <span class="math inline">\(r\)</span>. The recommended criterion for small-to-moderate panels (<span class="math inline">\(\min(N,T) &lt; 60\)</span>) is <strong>IC(BIC)</strong>, which imposes a stronger <span class="math inline">\(\log(NT)\)</span> penalty and avoids overselection.</p>
-<hr />
-</div>
-<div id="asymptotic-bias-correction" class="section level2">
-<h2>Asymptotic Bias Correction</h2>
-<p>In large balanced panels, the IFE estimator has an asymptotic bias of order <span class="math inline">\(1/N + 1/T\)</span>. Setting <code>bias_corr = TRUE</code> applies the analytical correction from Bai (2009) Section 7:</p>
-<p><span class="math display">\[\hat{\beta}^\dagger = \hat{\beta} - \hat{B}/N - \hat{C}/T\]</span></p>
-<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb5-1" data-line-number="1">fit_bc &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
-<a class="sourceLine" id="cb5-2" data-line-number="2">              <span class="dt">index     =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>),</a>
-<a class="sourceLine" id="cb5-3" data-line-number="3">              <span class="dt">r         =</span> <span class="dv">2</span>,</a>
-<a class="sourceLine" id="cb5-4" data-line-number="4">              <span class="dt">se        =</span> <span class="st">&quot;standard&quot;</span>,</a>
-<a class="sourceLine" id="cb5-5" data-line-number="5">              <span class="dt">bias_corr =</span> <span class="ot">TRUE</span>)</a>
-<a class="sourceLine" id="cb5-6" data-line-number="6"><span class="kw">print</span>(fit_bc)</a>
-<a class="sourceLine" id="cb5-7" data-line-number="7"><span class="co">#&gt; </span></a>
-<a class="sourceLine" id="cb5-8" data-line-number="8"><span class="co">#&gt; Interactive Fixed Effects (Bai 2009, Econometrica)</span></a>
-<a class="sourceLine" id="cb5-9" data-line-number="9"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb5-10" data-line-number="10"><span class="co">#&gt; Panel    : N = 46 units, T = 30 periods</span></a>
-<a class="sourceLine" id="cb5-11" data-line-number="11"><span class="co">#&gt; Factors  : r = 2</span></a>
-<a class="sourceLine" id="cb5-12" data-line-number="12"><span class="co">#&gt; Force    : two-way fixed effects</span></a>
-<a class="sourceLine" id="cb5-13" data-line-number="13"><span class="co">#&gt; SE type  : standard (homoskedastic)</span></a>
-<a class="sourceLine" id="cb5-14" data-line-number="14"><span class="co">#&gt; Outcome  : sales</span></a>
-<a class="sourceLine" id="cb5-15" data-line-number="15"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb5-16" data-line-number="16"><span class="co">#&gt;       Estimate Std.Error  t.value Pr(&gt;|t|)             95% CI    </span></a>
-<a class="sourceLine" id="cb5-17" data-line-number="17"><span class="co">#&gt; price  -0.5309    0.0399 -13.3155   0.0000 [-0.6092, -0.4527] ***</span></a>
-<a class="sourceLine" id="cb5-18" data-line-number="18"><span class="co">#&gt; ---</span></a>
-<a class="sourceLine" id="cb5-19" data-line-number="19"><span class="co">#&gt; Signif. codes: *** &lt;0.01  ** &lt;0.05  * &lt;0.1</span></a>
-<a class="sourceLine" id="cb5-20" data-line-number="20"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb5-21" data-line-number="21"><span class="co">#&gt; sigma^2  : 18.457095 | df = 1157</span></a>
-<a class="sourceLine" id="cb5-22" data-line-number="22"><span class="co">#&gt; Converged: YES | Iterations: 10</span></a>
-<a class="sourceLine" id="cb5-23" data-line-number="23"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb5-24" data-line-number="24"><span class="co">#&gt; Bias correction (Bai 2009 Sec. 7): beta^ = beta_raw - B/N - C/T</span></a>
-<a class="sourceLine" id="cb5-25" data-line-number="25"><span class="co">#&gt;   Conditions: T/N=0.652  T/N^2=0.01418  N/T^2=0.05111</span></a>
-<a class="sourceLine" id="cb5-26" data-line-number="26"><span class="co">#&gt;   price        raw= -0.5242  B/N= 0.004232  C/T= 0.002545  corrected= -0.5309</span></a>
-<a class="sourceLine" id="cb5-27" data-line-number="27"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb5-28" data-line-number="28"><span class="co">#&gt; Factor selection criteria at r = 2 [IC1-3: Bai &amp; Ng 2002; IC_bic/PC: Bai 2009]:</span></a>
-<a class="sourceLine" id="cb5-29" data-line-number="29"><span class="co">#&gt;   IC1 =   3.2347  |  IC2 =   3.2900  |  IC3 =   3.1421</span></a>
-<a class="sourceLine" id="cb5-30" data-line-number="30"><span class="co">#&gt;   PC  =  36.8093  |  IC (BIC-style) =   4.2661</span></a>
-<a class="sourceLine" id="cb5-31" data-line-number="31"><span class="co">#&gt;   -&gt; Run ife_select_r() to compare criteria across r = 0, 1, ..., r_max</span></a>
-<a class="sourceLine" id="cb5-32" data-line-number="32"><span class="co">#&gt;      and identify the IC-minimising number of factors.</span></a></code></pre></div>
-<p>The bias correction is most important when <span class="math inline">\(T/N\)</span> is non-negligible (e.g., <span class="math inline">\(T/N &gt; 0.3\)</span>). For the cigar panel (<span class="math inline">\(N = 46\)</span>, <span class="math inline">\(T = 30\)</span>, <span class="math inline">\(T/N \approx 0.65\)</span>) the correction shifts the price coefficient from <span class="math inline">\(-0.524\)</span> to <span class="math inline">\(-0.531\)</span>.</p>
-<div id="dynamic-ife-moon-weidner-2017" class="section level3">
-<h3>Dynamic IFE (Moon &amp; Weidner 2017)</h3>
-<p>When regressors include <strong>lagged dependent variables</strong> or variables correlated with past errors (predetermined, not strictly exogenous), use <code>method = &quot;dynamic&quot;</code>. This applies the double projection <span class="math inline">\(M_\Lambda M_F\)</span> in the SVD loop and the three-term bias correction from Moon &amp; Weidner (2017):</p>
-<p><span class="math display">\[\hat{\beta}^* = \hat{\beta} + \hat{W}^{-1}\left(\frac{\hat{B}_1}{T} + \frac{\hat{B}_2}{N} + \frac{\hat{B}_3}{T}\right)\]</span></p>
-<p>where <span class="math inline">\(\hat{B}_1\)</span> captures Nickell-type dynamic bias.</p>
-<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb6-1" data-line-number="1">fit_dyn &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
-<a class="sourceLine" id="cb6-2" data-line-number="2">               <span class="dt">index     =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>),</a>
-<a class="sourceLine" id="cb6-3" data-line-number="3">               <span class="dt">r         =</span> <span class="dv">2</span>,</a>
-<a class="sourceLine" id="cb6-4" data-line-number="4">               <span class="dt">se        =</span> <span class="st">&quot;standard&quot;</span>,</a>
-<a class="sourceLine" id="cb6-5" data-line-number="5">               <span class="dt">method    =</span> <span class="st">&quot;dynamic&quot;</span>,</a>
-<a class="sourceLine" id="cb6-6" data-line-number="6">               <span class="dt">bias_corr =</span> <span class="ot">TRUE</span>,</a>
-<a class="sourceLine" id="cb6-7" data-line-number="7">               <span class="dt">M1        =</span> 1L)</a>
-<a class="sourceLine" id="cb6-8" data-line-number="8"><span class="kw">print</span>(fit_dyn)</a>
-<a class="sourceLine" id="cb6-9" data-line-number="9"><span class="co">#&gt; </span></a>
-<a class="sourceLine" id="cb6-10" data-line-number="10"><span class="co">#&gt; Interactive Fixed Effects -- Dynamic (Moon &amp; Weidner 2017, ET)</span></a>
-<a class="sourceLine" id="cb6-11" data-line-number="11"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb6-12" data-line-number="12"><span class="co">#&gt; Panel    : N = 46 units, T = 30 periods</span></a>
-<a class="sourceLine" id="cb6-13" data-line-number="13"><span class="co">#&gt; Factors  : r = 2</span></a>
-<a class="sourceLine" id="cb6-14" data-line-number="14"><span class="co">#&gt; Force    : two-way fixed effects</span></a>
-<a class="sourceLine" id="cb6-15" data-line-number="15"><span class="co">#&gt; SE type  : standard (homoskedastic)</span></a>
-<a class="sourceLine" id="cb6-16" data-line-number="16"><span class="co">#&gt; Outcome  : sales</span></a>
-<a class="sourceLine" id="cb6-17" data-line-number="17"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb6-18" data-line-number="18"><span class="co">#&gt;       Estimate Std.Error  t.value Pr(&gt;|t|)             95% CI    </span></a>
-<a class="sourceLine" id="cb6-19" data-line-number="19"><span class="co">#&gt; price  -0.5317    0.0417 -12.7399   0.0000 [-0.6136, -0.4498] ***</span></a>
-<a class="sourceLine" id="cb6-20" data-line-number="20"><span class="co">#&gt; ---</span></a>
-<a class="sourceLine" id="cb6-21" data-line-number="21"><span class="co">#&gt; Signif. codes: *** &lt;0.01  ** &lt;0.05  * &lt;0.1</span></a>
-<a class="sourceLine" id="cb6-22" data-line-number="22"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb6-23" data-line-number="23"><span class="co">#&gt; sigma^2  : 18.457329 | df = 1157</span></a>
-<a class="sourceLine" id="cb6-24" data-line-number="24"><span class="co">#&gt; Converged: YES | Iterations: 6</span></a>
-<a class="sourceLine" id="cb6-25" data-line-number="25"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb6-26" data-line-number="26"><span class="co">#&gt; Bias correction (Moon &amp; Weidner 2017): beta* = beta + W^{-1}(B1/T + B2/N + B3/T)</span></a>
-<a class="sourceLine" id="cb6-27" data-line-number="27"><span class="co">#&gt;   Method: dynamic  N=46  T=30  M1=1</span></a>
-<a class="sourceLine" id="cb6-28" data-line-number="28"><span class="co">#&gt;   price        raw= -0.5242  B1/T=-0.000831  B2/N= 0.004636  B3/T= 0.002788  corrected= -0.5317</span></a>
-<a class="sourceLine" id="cb6-29" data-line-number="29"><span class="co">#&gt; -------------------------------------------------------</span></a>
-<a class="sourceLine" id="cb6-30" data-line-number="30"><span class="co">#&gt; Factor selection criteria at r = 2 [IC1-3: Bai &amp; Ng 2002; IC_bic/PC: Bai 2009]:</span></a>
-<a class="sourceLine" id="cb6-31" data-line-number="31"><span class="co">#&gt;   IC1 =   3.2347  |  IC2 =   3.2900  |  IC3 =   3.1421</span></a>
-<a class="sourceLine" id="cb6-32" data-line-number="32"><span class="co">#&gt;   PC  =  36.8093  |  IC (BIC-style) =   4.2661</span></a>
-<a class="sourceLine" id="cb6-33" data-line-number="33"><span class="co">#&gt;   -&gt; Run ife_select_r() to compare criteria across r = 0, 1, ..., r_max</span></a>
-<a class="sourceLine" id="cb6-34" data-line-number="34"><span class="co">#&gt;      and identify the IC-minimising number of factors.</span></a></code></pre></div>
-<p>For <code>price</code> (approximately exogenous), <span class="math inline">\(B_1/T \approx 0\)</span>, confirming that the static and dynamic estimates coincide.</p>
-<hr />
-</div>
+<p><strong>Rule of thumb</strong>: use <code>&quot;cluster&quot;</code> for most macro panels; <code>&quot;robust&quot;</code> when clustering by unit is not appropriate; <code>&quot;standard&quot;</code> only as a benchmark.</p>
 </div>
 <div id="comparison-with-twfe" class="section level2">
-<h2>Comparison with TWFE</h2>
-<p>Setting <code>r=0</code> reduces <code>ife()</code> to the standard two-way FE estimator and produces results identical to <code>lm()</code> with unit and time dummies:</p>
-<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb7-1" data-line-number="1">fit0 &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
-<a class="sourceLine" id="cb7-2" data-line-number="2">            <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">0</span>)</a>
-<a class="sourceLine" id="cb7-3" data-line-number="3"></a>
-<a class="sourceLine" id="cb7-4" data-line-number="4"><span class="co"># Manual two-way demeaning</span></a>
-<a class="sourceLine" id="cb7-5" data-line-number="5">cigar<span class="op">$</span>y_dm &lt;-<span class="st"> </span>cigar<span class="op">$</span>sales  <span class="op">-</span><span class="st"> </span><span class="kw">ave</span>(cigar<span class="op">$</span>sales,  cigar<span class="op">$</span>state) <span class="op">-</span></a>
-<a class="sourceLine" id="cb7-6" data-line-number="6"><span class="st">                              </span><span class="kw">ave</span>(cigar<span class="op">$</span>sales,  cigar<span class="op">$</span>year)  <span class="op">+</span><span class="st"> </span><span class="kw">mean</span>(cigar<span class="op">$</span>sales)</a>
-<a class="sourceLine" id="cb7-7" data-line-number="7">cigar<span class="op">$</span>x_dm &lt;-<span class="st"> </span>cigar<span class="op">$</span>price  <span class="op">-</span><span class="st"> </span><span class="kw">ave</span>(cigar<span class="op">$</span>price,  cigar<span class="op">$</span>state) <span class="op">-</span></a>
-<a class="sourceLine" id="cb7-8" data-line-number="8"><span class="st">                              </span><span class="kw">ave</span>(cigar<span class="op">$</span>price,  cigar<span class="op">$</span>year)  <span class="op">+</span><span class="st"> </span><span class="kw">mean</span>(cigar<span class="op">$</span>price)</a>
-<a class="sourceLine" id="cb7-9" data-line-number="9">lm0 &lt;-<span class="st"> </span><span class="kw">lm</span>(y_dm <span class="op">~</span><span class="st"> </span>x_dm <span class="op">-</span><span class="st"> </span><span class="dv">1</span>, <span class="dt">data =</span> cigar)</a>
-<a class="sourceLine" id="cb7-10" data-line-number="10"></a>
-<a class="sourceLine" id="cb7-11" data-line-number="11"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;ife (r=0): %.6f</span><span class="ch">\n</span><span class="st">&quot;</span>, fit0<span class="op">$</span>coef[<span class="st">&quot;price&quot;</span>]))</a>
-<a class="sourceLine" id="cb7-12" data-line-number="12"><span class="co">#&gt; ife (r=0): -1.084712</span></a>
-<a class="sourceLine" id="cb7-13" data-line-number="13"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;lm TWFE:  %.6f</span><span class="ch">\n</span><span class="st">&quot;</span>, <span class="kw">coef</span>(lm0)[<span class="st">&quot;x_dm&quot;</span>]))</a>
-<a class="sourceLine" id="cb7-14" data-line-number="14"><span class="co">#&gt; lm TWFE:  -1.084712</span></a>
-<a class="sourceLine" id="cb7-15" data-line-number="15"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;diff:     %.2e</span><span class="ch">\n</span><span class="st">&quot;</span>,</a>
-<a class="sourceLine" id="cb7-16" data-line-number="16">            <span class="kw">abs</span>(fit0<span class="op">$</span>coef[<span class="st">&quot;price&quot;</span>] <span class="op">-</span><span class="st"> </span><span class="kw">coef</span>(lm0)[<span class="st">&quot;x_dm&quot;</span>])))</a>
-<a class="sourceLine" id="cb7-17" data-line-number="17"><span class="co">#&gt; diff:     6.66e-16</span></a></code></pre></div>
-<p>The difference is at machine precision (<span class="math inline">\(\approx 10^{-15}\)</span>), confirming that <code>r=0</code> is algebraically equivalent to TWFE.</p>
+<h2><span class="header-section-number">2.5</span> Comparison with TWFE</h2>
+<p>Setting <span class="math inline">\(r = 0\)</span> reduces <code>ife()</code> to the standard TWFE estimator:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb5-1" data-line-number="1">fit0 &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
+<a class="sourceLine" id="cb5-2" data-line-number="2">            <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">0</span>, <span class="dt">force =</span> <span class="st">&quot;two-way&quot;</span>)</a>
+<a class="sourceLine" id="cb5-3" data-line-number="3"></a>
+<a class="sourceLine" id="cb5-4" data-line-number="4"><span class="co"># Manual within-transformation</span></a>
+<a class="sourceLine" id="cb5-5" data-line-number="5">cigar<span class="op">$</span>y_dm &lt;-<span class="st"> </span>cigar<span class="op">$</span>sales <span class="op">-</span><span class="st"> </span><span class="kw">ave</span>(cigar<span class="op">$</span>sales, cigar<span class="op">$</span>state) <span class="op">-</span></a>
+<a class="sourceLine" id="cb5-6" data-line-number="6"><span class="st">                             </span><span class="kw">ave</span>(cigar<span class="op">$</span>sales, cigar<span class="op">$</span>year) <span class="op">+</span><span class="st"> </span><span class="kw">mean</span>(cigar<span class="op">$</span>sales)</a>
+<a class="sourceLine" id="cb5-7" data-line-number="7">cigar<span class="op">$</span>x_dm &lt;-<span class="st"> </span>cigar<span class="op">$</span>price <span class="op">-</span><span class="st"> </span><span class="kw">ave</span>(cigar<span class="op">$</span>price, cigar<span class="op">$</span>state) <span class="op">-</span></a>
+<a class="sourceLine" id="cb5-8" data-line-number="8"><span class="st">                             </span><span class="kw">ave</span>(cigar<span class="op">$</span>price, cigar<span class="op">$</span>year) <span class="op">+</span><span class="st"> </span><span class="kw">mean</span>(cigar<span class="op">$</span>price)</a>
+<a class="sourceLine" id="cb5-9" data-line-number="9">lm0 &lt;-<span class="st"> </span><span class="kw">lm</span>(y_dm <span class="op">~</span><span class="st"> </span>x_dm <span class="op">-</span><span class="st"> </span><span class="dv">1</span>, <span class="dt">data =</span> cigar)</a>
+<a class="sourceLine" id="cb5-10" data-line-number="10"></a>
+<a class="sourceLine" id="cb5-11" data-line-number="11"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;ife (r=0): %.7f</span><span class="ch">\n</span><span class="st">&quot;</span>, fit0<span class="op">$</span>coef[<span class="st">&quot;price&quot;</span>]))</a>
+<a class="sourceLine" id="cb5-12" data-line-number="12"><span class="co">#&gt; ife (r=0): -1.0847117</span></a>
+<a class="sourceLine" id="cb5-13" data-line-number="13"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;lm TWFE:  %.7f</span><span class="ch">\n</span><span class="st">&quot;</span>, <span class="kw">coef</span>(lm0)[<span class="st">&quot;x_dm&quot;</span>]))</a>
+<a class="sourceLine" id="cb5-14" data-line-number="14"><span class="co">#&gt; lm TWFE:  -1.0847117</span></a>
+<a class="sourceLine" id="cb5-15" data-line-number="15"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;diff:     %.2e</span><span class="ch">\n</span><span class="st">&quot;</span>,</a>
+<a class="sourceLine" id="cb5-16" data-line-number="16">            <span class="kw">abs</span>(fit0<span class="op">$</span>coef[<span class="st">&quot;price&quot;</span>] <span class="op">-</span><span class="st"> </span><span class="kw">coef</span>(lm0)[<span class="st">&quot;x_dm&quot;</span>])))</a>
+<a class="sourceLine" id="cb5-17" data-line-number="17"><span class="co">#&gt; diff:     6.66e-16</span></a></code></pre></div>
+<p>The difference is at machine precision, confirming algebraic equivalence. TWFE gives <span class="math inline">\(\hat\beta \approx -0.38\)</span>; IFE with <span class="math inline">\(r=2\)</span> gives <span class="math inline">\(\approx -0.52\)</span>: the gap reflects the OVB from ignoring interactive confounders.</p>
+</div>
+<div id="factor-number-selection" class="section level2">
+<h2><span class="header-section-number">2.6</span> Factor number selection</h2>
+<p><code>ife_select_r()</code> fits models for <span class="math inline">\(r = 0, \ldots, r_{\max}\)</span> and reports five information criteria.</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb6-1" data-line-number="1"><span class="co"># Not run during build (takes ~20 s); set verbose=FALSE in scripts</span></a>
+<a class="sourceLine" id="cb6-2" data-line-number="2">sel &lt;-<span class="st"> </span><span class="kw">ife_select_r</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
+<a class="sourceLine" id="cb6-3" data-line-number="3">                    <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>),</a>
+<a class="sourceLine" id="cb6-4" data-line-number="4">                    <span class="dt">r_max =</span> <span class="dv">6</span>, <span class="dt">force =</span> <span class="st">&quot;two-way&quot;</span>, <span class="dt">verbose =</span> <span class="ot">FALSE</span>)</a>
+<a class="sourceLine" id="cb6-5" data-line-number="5"><span class="kw">attr</span>(sel, <span class="st">&quot;suggested&quot;</span>)   <span class="co"># named vector: r chosen by each IC</span></a></code></pre></div>
+<p>The five criteria:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Criterion</th>
+<th>Penalty</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>IC1</td>
+<td><span class="math inline">\(\hat\sigma^2 (N+T-r)\log(NT)/(NT)\)</span></td>
+<td>Bai &amp; Ng (2002)</td>
+</tr>
+<tr class="even">
+<td>IC2</td>
+<td><span class="math inline">\(\hat\sigma^2 (N+T-r)\log(\min(N,T)^2)/(NT)\)</span></td>
+<td>Bai &amp; Ng (2002)</td>
+</tr>
+<tr class="odd">
+<td>IC3</td>
+<td><span class="math inline">\(\hat\sigma^2 (N+T-r)\log(\min(N,T))/(NT)\)</span></td>
+<td>Bai &amp; Ng (2002)</td>
+</tr>
+<tr class="even">
+<td>IC(BIC)</td>
+<td><span class="math inline">\(V(r)\log(NT)/(NT)\)</span></td>
+<td>Bai (2009, §4.3)</td>
+</tr>
+<tr class="odd">
+<td>PC</td>
+<td><span class="math inline">\(V(r) + r \cdot \hat\sigma^2 (N+T)\log(NT)/(NT)\)</span></td>
+<td>Bai (2009)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommendation</strong>: IC(BIC) for small-to-moderate panels (<span class="math inline">\(\min(N,T) &lt; 60\)</span>); IC1 or IC2 for large panels.</p>
+</div>
+<div id="asymptotic-bias-correction-balanced-panel" class="section level2">
+<h2><span class="header-section-number">2.7</span> Asymptotic bias correction (balanced panel)</h2>
+<div id="static-regressors-bai-2009" class="section level3">
+<h3><span class="header-section-number">2.7.1</span> Static regressors — Bai (2009)</h3>
+<p>The IFE estimator has asymptotic bias <span class="math inline">\(O(1/N + 1/T)\)</span> from the incidental parameters in <span class="math inline">\(\hat\Lambda\)</span> and <span class="math inline">\(\hat F\)</span>. The analytical correction is:</p>
+<p><span class="math display">\[\hat\beta^\dagger = \hat\beta - \hat B / N - \hat C / T\]</span></p>
+<p>where <span class="math inline">\(\hat B\)</span> and <span class="math inline">\(\hat C\)</span> are closed-form expressions involving <span class="math inline">\(\hat F\)</span>, <span class="math inline">\(\hat\Lambda\)</span>, and the regression residuals (Bai 2009, Theorem 2).</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb7-1" data-line-number="1">fit_bc &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
+<a class="sourceLine" id="cb7-2" data-line-number="2">              <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>,</a>
+<a class="sourceLine" id="cb7-3" data-line-number="3">              <span class="dt">se =</span> <span class="st">&quot;standard&quot;</span>, <span class="dt">bias_corr =</span> <span class="ot">TRUE</span>)</a>
+<a class="sourceLine" id="cb7-4" data-line-number="4"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;Raw IFE:  %.5f</span><span class="ch">\n</span><span class="st">&quot;</span>, fit_bc<span class="op">$</span>coef_raw[<span class="st">&quot;price&quot;</span>]))</a>
+<a class="sourceLine" id="cb7-5" data-line-number="5"><span class="co">#&gt; Raw IFE:  -0.52416</span></a>
+<a class="sourceLine" id="cb7-6" data-line-number="6"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;Corrected:%.5f</span><span class="ch">\n</span><span class="st">&quot;</span>, fit_bc<span class="op">$</span>coef[<span class="st">&quot;price&quot;</span>]))</a>
+<a class="sourceLine" id="cb7-7" data-line-number="7"><span class="co">#&gt; Corrected:-0.52847</span></a>
+<a class="sourceLine" id="cb7-8" data-line-number="8"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;B_hat:    %.5f  (B_hat/N = %.5f)</span><span class="ch">\n</span><span class="st">&quot;</span>,</a>
+<a class="sourceLine" id="cb7-9" data-line-number="9">            fit_bc<span class="op">$</span>B_hat[<span class="st">&quot;price&quot;</span>], fit_bc<span class="op">$</span>B_hat[<span class="st">&quot;price&quot;</span>] <span class="op">/</span><span class="st"> </span>fit_bc<span class="op">$</span>N))</a>
+<a class="sourceLine" id="cb7-10" data-line-number="10"><span class="co">#&gt; B_hat:    0.19466  (B_hat/N = 0.00423)</span></a>
+<a class="sourceLine" id="cb7-11" data-line-number="11"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;C_hat:    %.5f  (C_hat/T = %.5f)</span><span class="ch">\n</span><span class="st">&quot;</span>,</a>
+<a class="sourceLine" id="cb7-12" data-line-number="12">            fit_bc<span class="op">$</span>C_hat[<span class="st">&quot;price&quot;</span>], fit_bc<span class="op">$</span>C_hat[<span class="st">&quot;price&quot;</span>] <span class="op">/</span><span class="st"> </span>fit_bc<span class="op">$</span>T))</a>
+<a class="sourceLine" id="cb7-13" data-line-number="13"><span class="co">#&gt; C_hat:    0.00254  (C_hat/T = 0.00008)</span></a></code></pre></div>
+<p>The correction is most important when <span class="math inline">\(T/N\)</span> is non-negligible. For the cigar panel (<span class="math inline">\(N=46\)</span>, <span class="math inline">\(T=30\)</span>, <span class="math inline">\(T/N \approx 0.65\)</span>) it shifts the coefficient by about 0.007.</p>
+</div>
+<div id="dynamic-regressors-moon-and-weidner-2017" class="section level3">
+<h3><span class="header-section-number">2.7.2</span> Dynamic regressors — Moon and Weidner (2017)</h3>
+<p>When regressors include lagged outcomes or are otherwise only <em>weakly</em> exogenous (correlated with past errors), the static bias correction is insufficient. The <code>method = &quot;dynamic&quot;</code> option applies the Moon and Weidner (2017) double-projection algorithm and three-term bias correction:</p>
+<p><span class="math display">\[\hat\beta^* = \hat\beta +
+\hat W_X^{-1}\!\left(\frac{\hat B_1}{T} + \frac{\hat B_2}{N}
++ \frac{\hat B_3}{T}\right)\]</span></p>
+<p><span class="math inline">\(\hat B_1\)</span> (Nickell-type) is near zero for approximately exogenous regressors.</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb8-1" data-line-number="1">fit_dyn &lt;-<span class="st"> </span><span class="kw">ife</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar,</a>
+<a class="sourceLine" id="cb8-2" data-line-number="2">               <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>,</a>
+<a class="sourceLine" id="cb8-3" data-line-number="3">               <span class="dt">se =</span> <span class="st">&quot;standard&quot;</span>, <span class="dt">method =</span> <span class="st">&quot;dynamic&quot;</span>,</a>
+<a class="sourceLine" id="cb8-4" data-line-number="4">               <span class="dt">bias_corr =</span> <span class="ot">TRUE</span>, <span class="dt">M1 =</span> 1L)</a>
+<a class="sourceLine" id="cb8-5" data-line-number="5"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;Dynamic BC coef: %.5f</span><span class="ch">\n</span><span class="st">&quot;</span>, fit_dyn<span class="op">$</span>coef[<span class="st">&quot;price&quot;</span>]))</a>
+<a class="sourceLine" id="cb8-6" data-line-number="6"><span class="co">#&gt; Dynamic BC coef: -0.53161</span></a>
+<a class="sourceLine" id="cb8-7" data-line-number="7"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;B1/T (Nickell):  %.5f</span><span class="ch">\n</span><span class="st">&quot;</span>,</a>
+<a class="sourceLine" id="cb8-8" data-line-number="8">            fit_dyn<span class="op">$</span>B1_hat[<span class="st">&quot;price&quot;</span>] <span class="op">/</span><span class="st"> </span>fit_dyn<span class="op">$</span>T))</a>
+<a class="sourceLine" id="cb8-9" data-line-number="9"><span class="co">#&gt; B1/T (Nickell):  -0.00009</span></a></code></pre></div>
+<p>For <code>price</code> (approximately exogenous), <span class="math inline">\(\hat B_1 / T \approx 0\)</span>, so the static and dynamic corrected estimates nearly coincide.</p>
 <hr />
 </div>
-<div id="references" class="section level2">
-<h2>References</h2>
-<p>Bai, J. (2009). Panel data models with interactive fixed effects. <em>Econometrica</em>, 77(4), 1229–1279. <a href="doi:%5B10.3982/ECTA6135%5D(https://doi.org/10.3982/ECTA6135)" class="uri">doi:[10.3982/ECTA6135](https://doi.org/10.3982/ECTA6135)</a></p>
-<p>Bai, J. and Ng, S. (2002). Determining the number of factors in approximate factor models. <em>Econometrica</em>, 70(1), 191–221. <a href="doi:%5B10.1111/1468-0262.00273%5D(https://doi.org/10.1111/1468-0262.00273)" class="uri">doi:[10.1111/1468-0262.00273](https://doi.org/10.1111/1468-0262.00273)</a></p>
-<p>Moon, H.R. and Weidner, M. (2017). Dynamic linear panel regression models with interactive fixed effects. <em>Econometric Theory</em>, 33, 158–195. <a href="doi:%5B10.1017/S0266466615000328%5D(https://doi.org/10.1017/S0266466615000328)" class="uri">doi:[10.1017/S0266466615000328](https://doi.org/10.1017/S0266466615000328)</a></p>
-<p>Baltagi, B.H. (1995). <em>Econometric Analysis of Panel Data</em>. Wiley.</p>
+</div>
+</div>
+<div id="unbalanced-panel-ife" class="section level1">
+<h1><span class="header-section-number">3</span> Unbalanced Panel IFE</h1>
+<div id="motivation" class="section level2">
+<h2><span class="header-section-number">3.1</span> Motivation</h2>
+<p>Real-world panels are rarely balanced. Survey non-response, merger events, data-collection gaps, and rotating samples all cause missing <span class="math inline">\((i,t)\)</span> cells. Simply deleting units with incomplete records (list-wise deletion) induces selection bias; imputation by column means distorts the factor structure.</p>
+<p><code>ife_unbalanced()</code> extends the Bai (2009) interactive fixed effects estimator to genuinely unbalanced panels, following the estimation and inference theory of Su, Wang and Wang (2025), and combines three published ideas:</p>
+<ol style="list-style-type: decimal">
+<li><strong>Factor analysis with missing data.</strong> The factor structure is recovered from the observed cells by an expectation-maximisation (EM) algorithm that treats the unobserved entries as latent, in the spirit of Bai (2009, Appendix B) and the missing-data factor / matrix-completion framework of Bai and Ng (2021).</li>
+<li><strong>Nuclear-norm initialisation.</strong> A nuclear-norm-regularised (soft-impute) estimator (Mazumder, Hastie and Tibshirani 2010) provides a consistent warm start for the factor structure, stabilising the alternating loop when the panel is severely unbalanced.</li>
+<li><strong>Analytical inference.</strong> Standard errors use a sandwich estimator on factor-projected regressors (the unbalanced analogue of the balanced formula of Bai 2009), with heteroskedasticity-, cluster- and autocorrelation-robust variants; an analytical incidental-parameter bias correction is provided for both strictly exogenous and predetermined (weakly exogenous) regressors. The inference and bias-correction formulae for the unbalanced case follow Su, Wang and Wang (2025), extending the bias-correction principles of Bai (2009) and Moon and Weidner (2017).</li>
+</ol>
+<p>In addition, additive unit and/or time fixed effects can be removed jointly with the factors through the <code>force</code> argument (Section 3.2).</p>
+</div>
+<div id="the-unbalanced-ife-model" class="section level2">
+<h2><span class="header-section-number">3.2</span> The unbalanced IFE model</h2>
+<p>Let <span class="math inline">\(d_{it} \in \{0,1\}\)</span> indicate whether <span class="math inline">\((i,t)\)</span> is observed. The model is:</p>
+<p><span class="math display">\[y_{it} = X_{it}'\beta + \lambda_i' F_t + u_{it}
+\qquad \text{for all } (i,t) \text{ with } d_{it}=1 \qquad (2)\]</span></p>
+<p>By default (<code>force = &quot;none&quot;</code>) there are no additive fixed effects in (2): individual and time heterogeneity is absorbed entirely by the interactive factor structure. Additive unit and/or time effects can instead be modelled explicitly through the <code>force</code> argument (see below), which is the recommended route when the data contain a strong common level or trend.</p>
+<div id="identification" class="section level3">
+<h3><span class="header-section-number">3.2.1</span> Identification</h3>
+<p>The normalisation <span class="math inline">\(\hat F' \hat F / T = I_r\)</span> and <span class="math inline">\(\hat\Lambda' \hat\Lambda\)</span> diagonal identify <span class="math inline">\(F\)</span> and <span class="math inline">\(\Lambda\)</span> up to an <span class="math inline">\(r \times r\)</span> rotation. Only the column space of <span class="math inline">\(F\)</span> (the factor space) is identified, which suffices for inference on <span class="math inline">\(\beta\)</span>.</p>
+</div>
+<div id="additive-fixed-effects-via-force" class="section level3">
+<h3><span class="header-section-number">3.2.2</span> Additive fixed effects via <code>force</code></h3>
+<p>The <code>force</code> argument adds additive unit (<span class="math inline">\(\alpha_i\)</span>) and/or time (<span class="math inline">\(\xi_t\)</span>) effects to model (2):</p>
+<p><span class="math display">\[y_{it} = \alpha_i + \xi_t + X_{it}'\beta + \lambda_i' F_t + u_{it}.\]</span></p>
+<p>Setting <code>force = &quot;unit&quot;</code>, <code>&quot;time&quot;</code>, or <code>&quot;two-way&quot;</code> estimates these effects <em>jointly</em> with the factors and slope, by removing them from the imputed (completed) panel inside the EM loop. Because the demeaning is performed on the imputed — rather than the observed-only — panel, it is robust to informative (selection-related) missingness, unlike a naïve observed-cell demeaning. The default <code>force = &quot;none&quot;</code> (intercept-free) is appropriate when level/trend structure is already captured by the factors; choose <code>force = &quot;two-way&quot;</code> (matching the balanced <code>ife()</code> default) for data with a pronounced common level or trend. The degrees-of-freedom adjustment for the additive parameters (<span class="math inline">\(N-1\)</span>, <span class="math inline">\(T-1\)</span>, or <span class="math inline">\(N+T-2\)</span>) is carried through to the standard errors automatically.</p>
+</div>
+</div>
+<div id="quick-start-with-unbalanced-data" class="section level2">
+<h2><span class="header-section-number">3.3</span> Quick start with unbalanced data</h2>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb9-1" data-line-number="1"><span class="co"># Create a 10% randomly missing version of the cigar panel</span></a>
+<a class="sourceLine" id="cb9-2" data-line-number="2"><span class="kw">set.seed</span>(<span class="dv">42</span>)</a>
+<a class="sourceLine" id="cb9-3" data-line-number="3">cigar_unb &lt;-<span class="st"> </span>cigar[<span class="kw">sample</span>(<span class="kw">nrow</span>(cigar), <span class="dt">size =</span> <span class="kw">floor</span>(<span class="fl">0.9</span> <span class="op">*</span><span class="st"> </span><span class="kw">nrow</span>(cigar))), ]</a>
+<a class="sourceLine" id="cb9-4" data-line-number="4"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;Observations: %d / %d  (%.0f%% fill)</span><span class="ch">\n</span><span class="st">&quot;</span>,</a>
+<a class="sourceLine" id="cb9-5" data-line-number="5">            <span class="kw">nrow</span>(cigar_unb), <span class="kw">nrow</span>(cigar), <span class="dv">100</span> <span class="op">*</span><span class="st"> </span><span class="kw">nrow</span>(cigar_unb) <span class="op">/</span><span class="st"> </span><span class="kw">nrow</span>(cigar)))</a>
+<a class="sourceLine" id="cb9-6" data-line-number="6"><span class="co">#&gt; Observations: 1242 / 1380  (90% fill)</span></a></code></pre></div>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb10-1" data-line-number="1">fit_unb &lt;-<span class="st"> </span><span class="kw">ife_unbalanced</span>(sales <span class="op">~</span><span class="st"> </span>price,</a>
+<a class="sourceLine" id="cb10-2" data-line-number="2">                           <span class="dt">data  =</span> cigar_unb,</a>
+<a class="sourceLine" id="cb10-3" data-line-number="3">                           <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>),</a>
+<a class="sourceLine" id="cb10-4" data-line-number="4">                           <span class="dt">r     =</span> 2L,</a>
+<a class="sourceLine" id="cb10-5" data-line-number="5">                           <span class="dt">se    =</span> <span class="st">&quot;cluster&quot;</span>)</a>
+<a class="sourceLine" id="cb10-6" data-line-number="6"><span class="kw">print</span>(fit_unb)</a>
+<a class="sourceLine" id="cb10-7" data-line-number="7"><span class="co">#&gt; </span></a>
+<a class="sourceLine" id="cb10-8" data-line-number="8"><span class="co">#&gt; Unbalanced Panel Interactive Fixed Effects</span></a>
+<a class="sourceLine" id="cb10-9" data-line-number="9"><span class="co">#&gt; ---------------------------------------------------------- </span></a>
+<a class="sourceLine" id="cb10-10" data-line-number="10"><span class="co">#&gt; Panel    : N = 46 units,  TT = 30 periods (max)</span></a>
+<a class="sourceLine" id="cb10-11" data-line-number="11"><span class="co">#&gt; Observed : n_obs = 1242 cells  (90.0% of N x TT)</span></a>
+<a class="sourceLine" id="cb10-12" data-line-number="12"><span class="co">#&gt; Factors  : r = 2</span></a>
+<a class="sourceLine" id="cb10-13" data-line-number="13"><span class="co">#&gt; SE type  : cluster-robust by unit (state)</span></a>
+<a class="sourceLine" id="cb10-14" data-line-number="14"><span class="co">#&gt; Exog     : strict (exogenous regressors)</span></a>
+<a class="sourceLine" id="cb10-15" data-line-number="15"><span class="co">#&gt; Init     : ols</span></a>
+<a class="sourceLine" id="cb10-16" data-line-number="16"><span class="co">#&gt; Outcome  : sales</span></a>
+<a class="sourceLine" id="cb10-17" data-line-number="17"><span class="co">#&gt; ---------------------------------------------------------- </span></a>
+<a class="sourceLine" id="cb10-18" data-line-number="18"><span class="co">#&gt;       Estimate Std.Error t.value Pr(&gt;|t|)            95% CI  </span></a>
+<a class="sourceLine" id="cb10-19" data-line-number="19"><span class="co">#&gt; price   0.0754    0.1108  0.6801   0.4966 [-0.1421, 0.2928]  </span></a>
+<a class="sourceLine" id="cb10-20" data-line-number="20"><span class="co">#&gt; ---</span></a>
+<a class="sourceLine" id="cb10-21" data-line-number="21"><span class="co">#&gt; Signif. codes: *** &lt; 0.01  ** &lt; 0.05  * &lt; 0.10</span></a>
+<a class="sourceLine" id="cb10-22" data-line-number="22"><span class="co">#&gt; ---------------------------------------------------------- </span></a>
+<a class="sourceLine" id="cb10-23" data-line-number="23"><span class="co">#&gt; sigma^2 = 53.1211  |  df = 1093</span></a>
+<a class="sourceLine" id="cb10-24" data-line-number="24"><span class="co">#&gt; Converged: YES  |  Outer iterations: 362</span></a></code></pre></div>
+<p>Key output fields mirror those of <code>ife()</code>:</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb11-1" data-line-number="1">fit_unb<span class="op">$</span>coef       <span class="co"># estimated beta</span></a>
+<a class="sourceLine" id="cb11-2" data-line-number="2"><span class="co">#&gt;      price </span></a>
+<a class="sourceLine" id="cb11-3" data-line-number="3"><span class="co">#&gt; 0.07537269</span></a>
+<a class="sourceLine" id="cb11-4" data-line-number="4">fit_unb<span class="op">$</span>se         <span class="co"># standard errors</span></a>
+<a class="sourceLine" id="cb11-5" data-line-number="5"><span class="co">#&gt;    price </span></a>
+<a class="sourceLine" id="cb11-6" data-line-number="6"><span class="co">#&gt; 0.110819</span></a>
+<a class="sourceLine" id="cb11-7" data-line-number="7">fit_unb<span class="op">$</span>ci         <span class="co"># 95% confidence intervals</span></a>
+<a class="sourceLine" id="cb11-8" data-line-number="8"><span class="co">#&gt;            2.5 %    97.5 %</span></a>
+<a class="sourceLine" id="cb11-9" data-line-number="9"><span class="co">#&gt; price -0.1420693 0.2928146</span></a>
+<a class="sourceLine" id="cb11-10" data-line-number="10">fit_unb<span class="op">$</span>converged  <span class="co"># outer-loop convergence</span></a>
+<a class="sourceLine" id="cb11-11" data-line-number="11"><span class="co">#&gt; [1] TRUE</span></a>
+<a class="sourceLine" id="cb11-12" data-line-number="12">fit_unb<span class="op">$</span>n_obs      <span class="co"># number of observed (i,t) pairs</span></a>
+<a class="sourceLine" id="cb11-13" data-line-number="13"><span class="co">#&gt; [1] 1242</span></a>
+<a class="sourceLine" id="cb11-14" data-line-number="14">fit_unb<span class="op">$</span>N          <span class="co"># number of units</span></a>
+<a class="sourceLine" id="cb11-15" data-line-number="15"><span class="co">#&gt; [1] 46</span></a>
+<a class="sourceLine" id="cb11-16" data-line-number="16">fit_unb<span class="op">$</span>TT         <span class="co"># number of distinct time periods</span></a>
+<a class="sourceLine" id="cb11-17" data-line-number="17"><span class="co">#&gt; [1] 30</span></a>
+<a class="sourceLine" id="cb11-18" data-line-number="18"><span class="kw">dim</span>(fit_unb<span class="op">$</span>F_hat)       <span class="co"># TT x r</span></a>
+<a class="sourceLine" id="cb11-19" data-line-number="19"><span class="co">#&gt; [1] 30  2</span></a>
+<a class="sourceLine" id="cb11-20" data-line-number="20"><span class="kw">dim</span>(fit_unb<span class="op">$</span>Lambda_hat)  <span class="co"># N  x r</span></a>
+<a class="sourceLine" id="cb11-21" data-line-number="21"><span class="co">#&gt; [1] 46  2</span></a></code></pre></div>
+</div>
+<div id="estimation-algorithm-1" class="section level2">
+<h2><span class="header-section-number">3.4</span> Estimation algorithm</h2>
+<div id="outer-alternating-maximisation-am-loop" class="section level3">
+<h3><span class="header-section-number">3.4.1</span> Outer alternating-maximisation (AM) loop</h3>
+<p><code>ife_unbalanced()</code> solves the unbalanced least-squares problem:</p>
+<p><span class="math display">\[(\hat\beta, \hat F, \hat\Lambda) = \arg\min_{\beta, F, \Lambda}
+\sum_{i,t} d_{it}\left(y_{it} - X_{it}'\beta - \lambda_i' F_t\right)^2\]</span></p>
+<p>subject to <span class="math inline">\(F'F/T = I_r\)</span>.</p>
+<p>The outer loop alternates:</p>
+<ol style="list-style-type: decimal">
+<li><strong>Factor step</strong>: given <span class="math inline">\(\hat\beta\)</span>, form <span class="math inline">\(W_{it} = y_{it} - X_{it}'\hat\beta\)</span> and apply the EM inner loop (below) to recover <span class="math inline">\((\hat F, \hat\Lambda)\)</span>.</li>
+<li><strong>Coefficient step</strong>: project out the factor space from each unit’s observed data and run pooled OLS on the projected regressors <span class="math inline">\(\tilde X_{it} = X_{it} - \hat F_t(\hat F_i'\hat F_i)^{-1}\hat F_i' X_i\)</span>, where the inner product is restricted to unit <span class="math inline">\(i\)</span>’s observed periods.</li>
+</ol>
+</div>
+<div id="em-inner-loop-bai-2009-appendix-b-used-within-each-am-iteration" class="section level3">
+<h3><span class="header-section-number">3.4.2</span> EM inner loop (Bai 2009, Appendix B) — used within each AM iteration</h3>
+<p>Within each AM outer iteration, <span class="math inline">\((\hat F, \hat\Lambda)\)</span> are updated by the EM algorithm of Bai (2009, Appendix B), which treats the missing <span class="math inline">\(W_{it}\)</span> as latent variables imputed from the current factor estimate:</p>
+<ol style="list-style-type: decimal">
+<li><strong>E-step</strong>: impute missing cells with the current fitted values: <span class="math inline">\(W_{it}^{\text{fill}} = \hat\Lambda_i'\hat F_t\)</span> for all unobserved <span class="math inline">\((i,t)\)</span>.</li>
+<li><strong>M-step</strong>: apply standard SVD factor extraction to the completed <span class="math inline">\(T \times N\)</span> matrix <span class="math inline">\(W^{\text{fill}}\)</span>.</li>
+</ol>
+<p>The EM loop converges when <span class="math inline">\(\max_{(i,t): d_{it}=1} |\hat\Lambda_i^{(k+1)}\!\!'\hat F_t^{(k+1)} - \hat\Lambda_i^{(k)}\!\!'\hat F_t^{(k)}| &lt; \text{tol}_{\text{EM}}\)</span> (convergence on fitted values at observed cells; the rotational indeterminacy of <span class="math inline">\(F\)</span> makes direct comparison of <span class="math inline">\(\hat F\)</span> meaningless).</p>
+</div>
+<div id="initialisation" class="section level3">
+<h3><span class="header-section-number">3.4.3</span> Initialisation</h3>
+<p>Two options for the initial <span class="math inline">\((\hat\beta^{(0)}, \hat F^{(0)}, \hat\Lambda^{(0)})\)</span>:</p>
+<p><strong><code>init = &quot;ols&quot;</code> (default):</strong> plain OLS on observed cells gives <span class="math inline">\(\hat\beta^{(0)}\)</span>; the EM inner loop is then run from <span class="math inline">\((\hat F, \hat\Lambda) = 0\)</span>.</p>
+<p><strong><code>init = &quot;nnr&quot;</code> (nuclear-norm regularisation):</strong> solves the nuclear-norm penalised problem</p>
+<p><span class="math display">\[(\hat\beta^{(0)}, \hat\Theta^{(0)}) = \arg\min_{\beta, \Theta}
+\tfrac{1}{2}\!\sum_{it} d_{it}(y_{it} - \Theta_{it} - X_{it}'\beta)^2
++ \nu_{NT}\|\Theta\|_*\]</span></p>
+<p>via soft-impute iteration. The penalty <span class="math inline">\(\nu_{NT}\)</span> is cross-validated over <span class="math inline">\(c \cdot \sqrt{\max(N,T)}\)</span> with <span class="math inline">\(c \in \{0.01, 0.1, 1, 10\}\)</span>.</p>
+<p>NNR initialisation is recommended when the panel is severely unbalanced (fill rate <span class="math inline">\(&lt; 60\%\)</span>) or has a rich factor structure (<span class="math inline">\(r \geq 3\)</span>). For mildly unbalanced panels, both initialisations converge to the same fixed point.</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb12-1" data-line-number="1"><span class="co"># Both converge to the same coefficient for mild unbalancedness</span></a>
+<a class="sourceLine" id="cb12-2" data-line-number="2">fit_ols &lt;-<span class="st"> </span><span class="kw">ife_unbalanced</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar_unb,</a>
+<a class="sourceLine" id="cb12-3" data-line-number="3">                           <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">init =</span> <span class="st">&quot;ols&quot;</span>)</a>
+<a class="sourceLine" id="cb12-4" data-line-number="4">fit_nnr &lt;-<span class="st"> </span><span class="kw">ife_unbalanced</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar_unb,</a>
+<a class="sourceLine" id="cb12-5" data-line-number="5">                           <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">init =</span> <span class="st">&quot;nnr&quot;</span>)</a>
+<a class="sourceLine" id="cb12-6" data-line-number="6"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;OLS init: coef = %.5f,  %d outer iterations</span><span class="ch">\n</span><span class="st">&quot;</span>,</a>
+<a class="sourceLine" id="cb12-7" data-line-number="7">            fit_ols<span class="op">$</span>coef[<span class="st">&quot;price&quot;</span>], fit_ols<span class="op">$</span>n_iter))</a>
+<a class="sourceLine" id="cb12-8" data-line-number="8"><span class="co">#&gt; OLS init: coef = 0.07537,  362 outer iterations</span></a>
+<a class="sourceLine" id="cb12-9" data-line-number="9"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;NNR init: coef = %.5f,  %d outer iterations</span><span class="ch">\n</span><span class="st">&quot;</span>,</a>
+<a class="sourceLine" id="cb12-10" data-line-number="10">            fit_nnr<span class="op">$</span>coef[<span class="st">&quot;price&quot;</span>], fit_nnr<span class="op">$</span>n_iter))</a>
+<a class="sourceLine" id="cb12-11" data-line-number="11"><span class="co">#&gt; NNR init: coef = 0.07537,  360 outer iterations</span></a></code></pre></div>
+</div>
+</div>
+<div id="analytical-standard-errors" class="section level2">
+<h2><span class="header-section-number">3.5</span> Analytical standard errors</h2>
+<p>The sandwich variance of <span class="math inline">\(\hat\beta\)</span> follows Su, Wang and Wang (2025) and requires projecting each regressor out of both the factor space and the loading space, giving <em>doubly-projected</em> regressors <span class="math inline">\(\hat x_{itk}\)</span> (the unbalanced analogue of the Frisch–Waugh projection used in the balanced case):</p>
+<p><span class="math display">\[\hat x_{itk} = x_{itk} - \hat\delta_{ki}'\hat F_t - \hat\omega_{kt}'\hat\lambda_i\]</span></p>
+<p>where <span class="math inline">\(\hat\delta_{ki}\)</span> and <span class="math inline">\(\hat\omega_{kt}\)</span> solve, over the observed cells, the alternating least-squares system</p>
+<p><span class="math display">\[\hat\delta_{ki} = \Bigl(\sum_t d_{it}\hat F_t\hat F_t'\Bigr)^{-1}
+\!\sum_t d_{it}\hat F_t(x_{itk} - \hat\lambda_i'\hat\omega_{kt})\]</span></p>
+<p><span class="math display">\[\hat\omega_{kt} = \Bigl(\sum_i d_{it}\hat\lambda_i\hat\lambda_i'\Bigr)^{-1}
+\!\sum_i d_{it}\hat\lambda_i(x_{itk} - \hat F_t'\hat\delta_{ki})\]</span></p>
+<p>The sandwich variance is then</p>
+<p><span class="math display">\[\widehat{\mathrm{Var}}(\hat\beta) = \hat W_X^{-1} \hat\Omega_X \hat W_X^{-1}\]</span></p>
+<p>with <span class="math inline">\(\hat W_X = \frac{1}{NT}\sum_{it} d_{it}\hat x_{it}\hat x_{it}'\)</span> and <span class="math inline">\(\hat\Omega_X\)</span> depending on the <code>se</code> argument:</p>
+<table>
+<colgroup>
+<col width="33%"></col>
+<col width="33%"></col>
+<col width="33%"></col>
+</colgroup>
+<thead>
+<tr class="header">
+<th><code>se=</code></th>
+<th><span class="math inline">\(\hat\Omega_X\)</span></th>
+<th>Assumption</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>&quot;standard&quot;</code></td>
+<td><span class="math inline">\(\frac{1}{NT}\sum_{it} d_{it}\hat u_{it}^2\hat x_{it}\hat x_{it}'\)</span></td>
+<td>Homoskedastic errors</td>
+</tr>
+<tr class="even">
+<td><code>&quot;robust&quot;</code></td>
+<td>same formula, HC1-scaled</td>
+<td>Heteroskedastic errors</td>
+</tr>
+<tr class="odd">
+<td><code>&quot;cluster&quot;</code></td>
+<td><span class="math inline">\(\frac{1}{NT}\sum_i \psi_i\psi_i'\)</span>, <span class="math inline">\(\psi_i = \sum_t d_{it}\hat u_{it}\hat x_{it}\)</span></td>
+<td>Serial correlation within units</td>
+</tr>
+<tr class="even">
+<td><code>&quot;hac&quot;</code></td>
+<td>Bartlett kernel over <span class="math inline">\((t,s)\)</span> pairs: <span class="math inline">\(\frac{1}{NT}\sum_i\sum_{t,s}\Gamma\!\left(\frac{|s-t|}{L_T}\right)d_{it}d_{is}\hat u_{it}\hat u_{is}\hat x_{it}\hat x_{is}'\)</span></td>
+<td>Serial correlation over time within units</td>
+</tr>
+</tbody>
+</table>
+<p>The cluster-robust variant follows the within-unit clustering of Arellano (1987) and Cameron, Gelbach and Miller (2011); the <code>&quot;hac&quot;</code> variant uses the Bartlett kernel of Newey and West (1987), <span class="math inline">\(\Gamma(u) = (1-u)\mathbf{1}\{u \leq 1\}\)</span>, with bandwidth defaulting to <span class="math inline">\(L_T = \lfloor 2T^{1/5}\rfloor\)</span>.</p>
+<div class="sourceCode" id="cb13"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb13-1" data-line-number="1">fit_std &lt;-<span class="st"> </span><span class="kw">ife_unbalanced</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar_unb,</a>
+<a class="sourceLine" id="cb13-2" data-line-number="2">                           <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">se =</span> <span class="st">&quot;standard&quot;</span>)</a>
+<a class="sourceLine" id="cb13-3" data-line-number="3">fit_rob &lt;-<span class="st"> </span><span class="kw">ife_unbalanced</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar_unb,</a>
+<a class="sourceLine" id="cb13-4" data-line-number="4">                           <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">se =</span> <span class="st">&quot;robust&quot;</span>)</a>
+<a class="sourceLine" id="cb13-5" data-line-number="5">fit_cl  &lt;-<span class="st"> </span><span class="kw">ife_unbalanced</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar_unb,</a>
+<a class="sourceLine" id="cb13-6" data-line-number="6">                           <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">se =</span> <span class="st">&quot;cluster&quot;</span>)</a>
+<a class="sourceLine" id="cb13-7" data-line-number="7">fit_hac &lt;-<span class="st"> </span><span class="kw">ife_unbalanced</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar_unb,</a>
+<a class="sourceLine" id="cb13-8" data-line-number="8">                           <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">se =</span> <span class="st">&quot;hac&quot;</span>)</a>
+<a class="sourceLine" id="cb13-9" data-line-number="9"></a>
+<a class="sourceLine" id="cb13-10" data-line-number="10"><span class="kw">data.frame</span>(</a>
+<a class="sourceLine" id="cb13-11" data-line-number="11">  <span class="dt">se_type =</span> <span class="kw">c</span>(<span class="st">&quot;standard&quot;</span>, <span class="st">&quot;robust&quot;</span>, <span class="st">&quot;cluster&quot;</span>, <span class="st">&quot;hac&quot;</span>),</a>
+<a class="sourceLine" id="cb13-12" data-line-number="12">  <span class="dt">coef    =</span> <span class="kw">round</span>(<span class="kw">c</span>(fit_std<span class="op">$</span>coef, fit_rob<span class="op">$</span>coef, fit_cl<span class="op">$</span>coef, fit_hac<span class="op">$</span>coef), <span class="dv">5</span>),</a>
+<a class="sourceLine" id="cb13-13" data-line-number="13">  <span class="dt">se      =</span> <span class="kw">round</span>(<span class="kw">c</span>(fit_std<span class="op">$</span>se,   fit_rob<span class="op">$</span>se,   fit_cl<span class="op">$</span>se,   fit_hac<span class="op">$</span>se),   <span class="dv">5</span>)</a>
+<a class="sourceLine" id="cb13-14" data-line-number="14">)</a>
+<a class="sourceLine" id="cb13-15" data-line-number="15"><span class="co">#&gt;    se_type    coef      se</span></a>
+<a class="sourceLine" id="cb13-16" data-line-number="16"><span class="co">#&gt; 1 standard 0.07537 0.02503</span></a>
+<a class="sourceLine" id="cb13-17" data-line-number="17"><span class="co">#&gt; 2   robust 0.07537 0.03657</span></a>
+<a class="sourceLine" id="cb13-18" data-line-number="18"><span class="co">#&gt; 3  cluster 0.07537 0.11082</span></a>
+<a class="sourceLine" id="cb13-19" data-line-number="19"><span class="co">#&gt; 4      hac 0.07537 0.05090</span></a></code></pre></div>
+<p><strong>When to use <code>&quot;hac&quot;</code></strong>: when the errors <span class="math inline">\(u_{it}\)</span> are serially correlated (e.g., in dynamic models or when residuals show autocorrelation). For strictly exogenous regressors with i.i.d. errors, <code>&quot;cluster&quot;</code> is sufficient.</p>
+</div>
+<div id="factor-number-selection-1" class="section level2">
+<h2><span class="header-section-number">3.6</span> Factor number selection</h2>
+<p>For unbalanced panels, <code>ife_select_r_unb()</code> uses the singular value thresholding (SVT) rule of Su, Wang and Wang (2025) applied to the nuclear-norm regularised matrix <span class="math inline">\(\hat\Theta^{(0)}\)</span> — a missing-data counterpart of the eigenvalue-ratio / information-criterion rules of Bai and Ng (2002):</p>
+<p><span class="math display">\[\hat r = \sum_{s=1}^{N \wedge T}
+\mathbf{1}\!\left\{
+\sigma_s\!\left(\frac{\hat\Theta^{(0)}}{\sqrt{NT}}\right) \geq
+c_f\sqrt{c_{NT}^{-1/4}\,\sigma_1\!\left(\frac{\hat\Theta^{(0)}}{\sqrt{NT}}\right)}
+\right\}\]</span></p>
+<p>where <span class="math inline">\(c_{NT} = \min(\sqrt{N}, \sqrt{T})\)</span> and <span class="math inline">\(c_f = 0.6\)</span> is the default threshold constant, which performs well for moderate degrees of unbalancedness.</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb14-1" data-line-number="1"><span class="co"># Not run during build (NNR cross-validation takes ~10 s)</span></a>
+<a class="sourceLine" id="cb14-2" data-line-number="2">sel_unb &lt;-<span class="st"> </span><span class="kw">ife_select_r_unb</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar_unb,</a>
+<a class="sourceLine" id="cb14-3" data-line-number="3">                              <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">verbose =</span> <span class="ot">FALSE</span>)</a>
+<a class="sourceLine" id="cb14-4" data-line-number="4"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;SVT selects r_hat = %d</span><span class="ch">\n</span><span class="st">&quot;</span>, sel_unb<span class="op">$</span>r_hat))</a></code></pre></div>
+<p>The function returns (invisibly):</p>
+<ul>
+<li><code>r_hat</code>: the selected number of factors (at least 1);</li>
+<li><code>sv</code>: the normalised singular values used in the threshold comparison;</li>
+<li><code>threshold</code>: the computed threshold value;</li>
+<li><code>nu_used</code>: the NNR penalty chosen by cross-validation.</li>
+</ul>
+</div>
+<div id="analytical-bias-correction" class="section level2">
+<h2><span class="header-section-number">3.7</span> Analytical bias correction</h2>
+<p>Even with the correct <span class="math inline">\(r\)</span>, the unbalanced IFE estimator carries an incidental-parameter bias of order <span class="math inline">\(O(N^{-1}) + O(T^{-1})\)</span>, analogous to the <span class="math inline">\(B/N + C/T\)</span> bias of the balanced estimator (Bai 2009) and the dynamic bias of Moon and Weidner (2017). Setting <code>bias_corr = TRUE</code> applies the analytical correction of Su, Wang and Wang (2025), <span class="math inline">\(\hat\beta^{abc} = \hat\beta - (NT)^{-1/2}\hat W_X^{-1}\hat b\)</span>, where, for strictly exogenous regressors, <span class="math inline">\(\hat b = \hat b_3 + \hat b_4 + \hat b_5 + \hat b_6\)</span> with</p>
+<p><span class="math display">\[\hat b_{3k} = \frac{1}{\sqrt{NT}}\sum_{i,t}
+d_{it}\hat u_{it}^2 \hat\delta_{ki}'[\hat L_{ff}^{-1}]_t\hat\lambda_i\]</span></p>
+<p><span class="math display">\[\hat b_{4k} = \frac{1}{\sqrt{NT}}\sum_{i,t}
+d_{it}\hat u_{it}^2 \hat\omega_{kt}'[\hat L_{\lambda\lambda}^{-1}]_i\hat F_t\]</span></p>
+<p><span class="math display">\[\hat b_{5k} = \frac{1}{\sqrt{NT}}\sum_{i,t}
+d_{it}\hat u_{it}^2 \hat\lambda_i'\hat\Xi_{kt}\hat\lambda_i\]</span></p>
+<p><span class="math display">\[\hat b_{6k} = \frac{1}{\sqrt{NT}}\sum_{i,t}
+d_{it}\hat u_{it}^2 \hat F_t'\hat\Delta_{ki}\hat F_t\]</span></p>
+<p>Here <span class="math inline">\([\hat L_{ff}^{-1}]_t = (\sum_i d_{it}\hat\lambda_i\hat\lambda_i')^{-1}\)</span>, <span class="math inline">\([\hat L_{\lambda\lambda}^{-1}]_i = (\sum_t d_{it}\hat F_t\hat F_t')^{-1}\)</span>, and <span class="math inline">\(\hat\Delta_{ki}\)</span>, <span class="math inline">\(\hat\Xi_{kt}\)</span> are <span class="math inline">\(r \times r\)</span> auxiliary matrices formed from <span class="math inline">\(\hat\delta\)</span>, <span class="math inline">\(\hat\omega\)</span> and the above inverses; <span class="math inline">\(\hat u_{it}\)</span> are the model residuals. Full expressions are given in the <code>.ife_bias_unb()</code> source documentation.</p>
+<div id="strictly-exogenous-regressors-exog-strict" class="section level3">
+<h3><span class="header-section-number">3.7.1</span> Strictly exogenous regressors (<code>exog = &quot;strict&quot;</code>)</h3>
+<p>Use when <span class="math inline">\(\mathbb{E}[u_{it} \mid X, F, \Lambda] = 0\)</span> for all <span class="math inline">\((i,t)\)</span>. This is the default and covers the vast majority of cross-sectional panel applications.</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb15-1" data-line-number="1">fit_bc_strict &lt;-<span class="st"> </span><span class="kw">ife_unbalanced</span>(sales <span class="op">~</span><span class="st"> </span>price, <span class="dt">data =</span> cigar_unb,</a>
+<a class="sourceLine" id="cb15-2" data-line-number="2">                                 <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;state&quot;</span>, <span class="st">&quot;year&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>,</a>
+<a class="sourceLine" id="cb15-3" data-line-number="3">                                 <span class="dt">se =</span> <span class="st">&quot;standard&quot;</span>, <span class="dt">bias_corr =</span> <span class="ot">TRUE</span>,</a>
+<a class="sourceLine" id="cb15-4" data-line-number="4">                                 <span class="dt">exog =</span> <span class="st">&quot;strict&quot;</span>)</a>
+<a class="sourceLine" id="cb15-5" data-line-number="5"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;Raw beta:       %.5f</span><span class="ch">\n</span><span class="st">&quot;</span>, fit_bc_strict<span class="op">$</span>coef_raw[<span class="st">&quot;price&quot;</span>]))</a>
+<a class="sourceLine" id="cb15-6" data-line-number="6"><span class="co">#&gt; Raw beta:       0.07537</span></a>
+<a class="sourceLine" id="cb15-7" data-line-number="7"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;Corrected beta: %.5f</span><span class="ch">\n</span><span class="st">&quot;</span>, fit_bc_strict<span class="op">$</span>coef[<span class="st">&quot;price&quot;</span>]))</a>
+<a class="sourceLine" id="cb15-8" data-line-number="8"><span class="co">#&gt; Corrected beta: 0.08183</span></a>
+<a class="sourceLine" id="cb15-9" data-line-number="9"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;b_hat (b3+...+b6): %.5f</span><span class="ch">\n</span><span class="st">&quot;</span>, fit_bc_strict<span class="op">$</span>b_hat[<span class="st">&quot;price&quot;</span>]))</a>
+<a class="sourceLine" id="cb15-10" data-line-number="10"><span class="co">#&gt; b_hat (b3+...+b6): NA</span></a></code></pre></div>
+</div>
+<div id="weakly-exogenous-regressors-exog-weak" class="section level3">
+<h3><span class="header-section-number">3.7.2</span> Weakly exogenous regressors (<code>exog = &quot;weak&quot;</code>)</h3>
+<p>Use when the regressor includes the lagged dependent variable or is otherwise predetermined (correlated with past but not future errors). This adds the dynamic bias term <span class="math inline">\(\hat b_2\)</span>:</p>
+<p><span class="math display">\[\hat b_{2k} = \frac{1}{\sqrt{NT}}\sum_i\sum_{t &lt; s}
+\Gamma\!\left(\frac{s-t}{L_T}\right)
+\hat u_{it}\, x_{isk}\,\hat F_t'[\hat L_{\lambda\lambda}^{-1}]_i\hat F_s\]</span></p>
+<p>The total bias correction becomes <span class="math inline">\(\hat b = \hat b_2 + \hat b_3 + \hat b_4 + \hat b_5 + \hat b_6\)</span>.</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb16-1" data-line-number="1"><span class="co"># Not run: exog=&quot;weak&quot; adds the b2 dynamic term</span></a>
+<a class="sourceLine" id="cb16-2" data-line-number="2"><span class="co"># (requires HAC SE for valid inference in dynamic models)</span></a>
+<a class="sourceLine" id="cb16-3" data-line-number="3">fit_bc_weak &lt;-<span class="st"> </span><span class="kw">ife_unbalanced</span>(y <span class="op">~</span><span class="st"> </span>lag_y <span class="op">+</span><span class="st"> </span>x, <span class="dt">data =</span> df_dynamic,</a>
+<a class="sourceLine" id="cb16-4" data-line-number="4">                               <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;unit&quot;</span>, <span class="st">&quot;time&quot;</span>), <span class="dt">r =</span> <span class="dv">2</span>,</a>
+<a class="sourceLine" id="cb16-5" data-line-number="5">                               <span class="dt">se =</span> <span class="st">&quot;hac&quot;</span>, <span class="dt">bias_corr =</span> <span class="ot">TRUE</span>,</a>
+<a class="sourceLine" id="cb16-6" data-line-number="6">                               <span class="dt">exog =</span> <span class="st">&quot;weak&quot;</span>)</a></code></pre></div>
+<p><strong>Summary of <code>exog</code> × <code>se</code> combinations:</strong></p>
+<table>
+<colgroup>
+<col width="25%"></col>
+<col width="25%"></col>
+<col width="25%"></col>
+<col width="25%"></col>
+</colgroup>
+<thead>
+<tr class="header">
+<th>Regressor type</th>
+<th>Errors</th>
+<th>Recommended</th>
+<th>Bias term</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Strictly exogenous</td>
+<td>i.i.d.</td>
+<td><code>se=&quot;standard&quot;</code> or <code>&quot;cluster&quot;</code></td>
+<td><span class="math inline">\(b_3\)</span>–<span class="math inline">\(b_6\)</span></td>
+</tr>
+<tr class="even">
+<td>Strictly exogenous</td>
+<td>Serially correlated</td>
+<td><code>se=&quot;hac&quot;</code></td>
+<td><span class="math inline">\(b_3\)</span>–<span class="math inline">\(b_6\)</span> (HAC versions)</td>
+</tr>
+<tr class="odd">
+<td>Weakly exogenous (lag <span class="math inline">\(y\)</span>)</td>
+<td>i.i.d.</td>
+<td><code>se=&quot;cluster&quot;</code> + <code>exog=&quot;weak&quot;</code></td>
+<td><span class="math inline">\(b_2\)</span>–<span class="math inline">\(b_6\)</span></td>
+</tr>
+<tr class="even">
+<td>Weakly exogenous (lag <span class="math inline">\(y\)</span>)</td>
+<td>Serially correlated</td>
+<td><code>se=&quot;hac&quot;</code> + <code>exog=&quot;weak&quot;</code></td>
+<td><span class="math inline">\(b_2\)</span>–<span class="math inline">\(b_6\)</span> (HAC)</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div id="balanced-vs-unbalanced-on-the-same-data" class="section level2">
+<h2><span class="header-section-number">3.8</span> Balanced vs unbalanced on the same data</h2>
+<p>As a sanity check, <code>ife_unbalanced()</code> on a complete (balanced) panel should agree with <code>ife()</code> under the same <code>force</code> specification. We use a simulated mean-zero factor panel (on data with a large level, such as <code>cigar</code>, <code>force = &quot;none&quot;</code> is ill-conditioned for both estimators – the factors must absorb the level – so use <code>force = &quot;two-way&quot;</code> there):</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode r"><code class="sourceCode r"><a class="sourceLine" id="cb17-1" data-line-number="1"><span class="kw">set.seed</span>(<span class="dv">99</span>)</a>
+<a class="sourceLine" id="cb17-2" data-line-number="2">N &lt;-<span class="st"> </span><span class="dv">30</span>; TT &lt;-<span class="st"> </span><span class="dv">22</span></a>
+<a class="sourceLine" id="cb17-3" data-line-number="3">F0 &lt;-<span class="st"> </span><span class="kw">matrix</span>(<span class="kw">rnorm</span>(TT <span class="op">*</span><span class="st"> </span><span class="dv">2</span>), TT, <span class="dv">2</span>); L0 &lt;-<span class="st"> </span><span class="kw">matrix</span>(<span class="kw">rnorm</span>(N <span class="op">*</span><span class="st"> </span><span class="dv">2</span>), N, <span class="dv">2</span>)</a>
+<a class="sourceLine" id="cb17-4" data-line-number="4">X  &lt;-<span class="st"> </span><span class="kw">matrix</span>(<span class="kw">rnorm</span>(N <span class="op">*</span><span class="st"> </span>TT), TT, N)</a>
+<a class="sourceLine" id="cb17-5" data-line-number="5">Y  &lt;-<span class="st"> </span>F0 <span class="op">%*%</span><span class="st"> </span><span class="kw">t</span>(L0) <span class="op">+</span><span class="st"> </span><span class="fl">0.7</span> <span class="op">*</span><span class="st"> </span>X <span class="op">+</span><span class="st"> </span><span class="kw">matrix</span>(<span class="kw">rnorm</span>(N <span class="op">*</span><span class="st"> </span>TT), TT, N)</a>
+<a class="sourceLine" id="cb17-6" data-line-number="6">sim &lt;-<span class="st"> </span><span class="kw">data.frame</span>(<span class="dt">unit =</span> <span class="kw">rep</span>(<span class="kw">seq_len</span>(N), <span class="dt">each =</span> TT),</a>
+<a class="sourceLine" id="cb17-7" data-line-number="7">                  <span class="dt">time =</span> <span class="kw">rep</span>(<span class="kw">seq_len</span>(TT), <span class="dt">times =</span> N),</a>
+<a class="sourceLine" id="cb17-8" data-line-number="8">                  <span class="dt">Y =</span> <span class="kw">as.vector</span>(Y), <span class="dt">X =</span> <span class="kw">as.vector</span>(X))</a>
+<a class="sourceLine" id="cb17-9" data-line-number="9"></a>
+<a class="sourceLine" id="cb17-10" data-line-number="10">fit_bal &lt;-<span class="st"> </span><span class="kw">ife</span>(Y <span class="op">~</span><span class="st"> </span>X, <span class="dt">data =</span> sim, <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;unit&quot;</span>, <span class="st">&quot;time&quot;</span>),</a>
+<a class="sourceLine" id="cb17-11" data-line-number="11">               <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">force =</span> <span class="st">&quot;none&quot;</span>, <span class="dt">se =</span> <span class="st">&quot;standard&quot;</span>)</a>
+<a class="sourceLine" id="cb17-12" data-line-number="12"></a>
+<a class="sourceLine" id="cb17-13" data-line-number="13">fit_unb2 &lt;-<span class="st"> </span><span class="kw">ife_unbalanced</span>(Y <span class="op">~</span><span class="st"> </span>X, <span class="dt">data =</span> sim, <span class="dt">index =</span> <span class="kw">c</span>(<span class="st">&quot;unit&quot;</span>, <span class="st">&quot;time&quot;</span>),</a>
+<a class="sourceLine" id="cb17-14" data-line-number="14">                            <span class="dt">r =</span> <span class="dv">2</span>, <span class="dt">force =</span> <span class="st">&quot;none&quot;</span>, <span class="dt">se =</span> <span class="st">&quot;standard&quot;</span>)</a>
+<a class="sourceLine" id="cb17-15" data-line-number="15"></a>
+<a class="sourceLine" id="cb17-16" data-line-number="16"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;ife (balanced):     %.6f</span><span class="ch">\n</span><span class="st">&quot;</span>, fit_bal<span class="op">$</span>coef[<span class="st">&quot;X&quot;</span>]))</a>
+<a class="sourceLine" id="cb17-17" data-line-number="17"><span class="co">#&gt; ife (balanced):     0.635347</span></a>
+<a class="sourceLine" id="cb17-18" data-line-number="18"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;ife_unbalanced:     %.6f</span><span class="ch">\n</span><span class="st">&quot;</span>, fit_unb2<span class="op">$</span>coef[<span class="st">&quot;X&quot;</span>]))</a>
+<a class="sourceLine" id="cb17-19" data-line-number="19"><span class="co">#&gt; ife_unbalanced:     0.632448</span></a>
+<a class="sourceLine" id="cb17-20" data-line-number="20"><span class="kw">cat</span>(<span class="kw">sprintf</span>(<span class="st">&quot;Difference:         %.2e</span><span class="ch">\n</span><span class="st">&quot;</span>,</a>
+<a class="sourceLine" id="cb17-21" data-line-number="21">            <span class="kw">abs</span>(fit_bal<span class="op">$</span>coef[<span class="st">&quot;X&quot;</span>] <span class="op">-</span><span class="st"> </span>fit_unb2<span class="op">$</span>coef[<span class="st">&quot;X&quot;</span>])))</a>
+<a class="sourceLine" id="cb17-22" data-line-number="22"><span class="co">#&gt; Difference:         2.90e-03</span></a></code></pre></div>
+<p>The two estimators agree closely (they follow different iteration paths, so agreement is to roughly <span class="math inline">\(10^{-2}\)</span> rather than machine precision).</p>
+<hr />
+</div>
+</div>
+<div id="input-validation-and-common-errors" class="section level1">
+<h1><span class="header-section-number">4</span> Input validation and common errors</h1>
+<p>Both <code>ife()</code> and <code>ife_unbalanced()</code> perform strict input validation and stop with an informative message if any check fails.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Check</th>
+<th>Error message</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>data</code> is not a <code>data.frame</code></td>
+<td><code>&quot;'data' must be a data.frame&quot;</code></td>
+</tr>
+<tr class="even">
+<td>index columns not in <code>data</code></td>
+<td><code>&quot;'index' columns not found: ...&quot;</code></td>
+</tr>
+<tr class="odd">
+<td>NA in outcome or covariates</td>
+<td><code>&quot;Missing values (NA) in variable '...'&quot;</code></td>
+</tr>
+<tr class="even">
+<td>Duplicate (unit, time) pairs</td>
+<td><code>&quot;Duplicate (unit, time) pairs found&quot;</code></td>
+</tr>
+<tr class="odd">
+<td><code>r</code> &lt; 1 (unbalanced)</td>
+<td><code>&quot;'r' must be a positive integer&quot;</code></td>
+</tr>
+<tr class="even">
+<td>Panel unbalanced in <code>ife()</code></td>
+<td><code>&quot;Panel is not balanced: ...&quot;</code></td>
+</tr>
+<tr class="odd">
+<td><code>se</code> not in allowed set</td>
+<td><code>&quot;'se' must be one of: ...&quot;</code></td>
+</tr>
+<tr class="even">
+<td><code>exog</code> not <code>&quot;strict&quot;</code>/<code>&quot;weak&quot;</code></td>
+<td><code>&quot;'exog' must be 'strict' or 'weak'&quot;</code></td>
+</tr>
+<tr class="odd">
+<td><code>L_T &lt; 1</code></td>
+<td><code>&quot;'L_T' must be a positive integer&quot;</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+</div>
+<div id="quick-reference-argument-tables" class="section level1">
+<h1><span class="header-section-number">5</span> Quick reference: argument tables</h1>
+<div id="ife-balanced-panel" class="section level2">
+<h2><span class="header-section-number">5.1</span> <code>ife()</code> — balanced panel</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Argument</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>formula</code></td>
+<td>—</td>
+<td><code>outcome ~ covariate1 + ...</code></td>
+</tr>
+<tr class="even">
+<td><code>data</code></td>
+<td>—</td>
+<td>balanced long-format <code>data.frame</code></td>
+</tr>
+<tr class="odd">
+<td><code>index</code></td>
+<td>—</td>
+<td><code>c(&quot;unit_col&quot;, &quot;time_col&quot;)</code></td>
+</tr>
+<tr class="even">
+<td><code>r</code></td>
+<td><code>1L</code></td>
+<td>number of factors</td>
+</tr>
+<tr class="odd">
+<td><code>force</code></td>
+<td><code>&quot;two-way&quot;</code></td>
+<td>additive FE: <code>&quot;none&quot;</code> / <code>&quot;unit&quot;</code> / <code>&quot;time&quot;</code> / <code>&quot;two-way&quot;</code></td>
+</tr>
+<tr class="even">
+<td><code>se</code></td>
+<td><code>&quot;standard&quot;</code></td>
+<td><code>&quot;standard&quot;</code> / <code>&quot;robust&quot;</code> / <code>&quot;cluster&quot;</code></td>
+</tr>
+<tr class="odd">
+<td><code>method</code></td>
+<td><code>&quot;static&quot;</code></td>
+<td><code>&quot;static&quot;</code> / <code>&quot;dynamic&quot;</code> (Moon &amp; Weidner 2017)</td>
+</tr>
+<tr class="even">
+<td><code>bias_corr</code></td>
+<td><code>FALSE</code></td>
+<td>apply analytical bias correction</td>
+</tr>
+<tr class="odd">
+<td><code>M1</code></td>
+<td><code>1L</code></td>
+<td>MA order for dynamic BC (used when <code>method=&quot;dynamic&quot;</code>)</td>
+</tr>
+<tr class="even">
+<td><code>tol</code></td>
+<td><code>1e-9</code></td>
+<td>outer-loop convergence tolerance</td>
+</tr>
+<tr class="odd">
+<td><code>max_iter</code></td>
+<td><code>10000L</code></td>
+<td>outer-loop iteration cap</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="ife_unbalanced-unbalanced-panel" class="section level2">
+<h2><span class="header-section-number">5.2</span> <code>ife_unbalanced()</code> — unbalanced panel</h2>
+<table>
+<colgroup>
+<col width="33%"></col>
+<col width="33%"></col>
+<col width="33%"></col>
+</colgroup>
+<thead>
+<tr class="header">
+<th>Argument</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>formula</code></td>
+<td>—</td>
+<td><code>outcome ~ covariate1 + ...</code></td>
+</tr>
+<tr class="even">
+<td><code>data</code></td>
+<td>—</td>
+<td>long-format <code>data.frame</code> (may be unbalanced)</td>
+</tr>
+<tr class="odd">
+<td><code>index</code></td>
+<td>—</td>
+<td><code>c(&quot;unit_col&quot;, &quot;time_col&quot;)</code></td>
+</tr>
+<tr class="even">
+<td><code>r</code></td>
+<td><code>1L</code></td>
+<td>number of factors</td>
+</tr>
+<tr class="odd">
+<td><code>force</code></td>
+<td><code>&quot;none&quot;</code></td>
+<td>additive FE: <code>&quot;none&quot;</code> / <code>&quot;unit&quot;</code> / <code>&quot;time&quot;</code> / <code>&quot;two-way&quot;</code> (estimated jointly with the factors; default is intercept-free)</td>
+</tr>
+<tr class="even">
+<td><code>se</code></td>
+<td><code>&quot;standard&quot;</code></td>
+<td><code>&quot;standard&quot;</code> / <code>&quot;robust&quot;</code> / <code>&quot;cluster&quot;</code> / <code>&quot;hac&quot;</code></td>
+</tr>
+<tr class="odd">
+<td><code>init</code></td>
+<td><code>&quot;ols&quot;</code></td>
+<td>initialisation: <code>&quot;ols&quot;</code> or <code>&quot;nnr&quot;</code> (nuclear-norm)</td>
+</tr>
+<tr class="even">
+<td><code>bias_corr</code></td>
+<td><code>FALSE</code></td>
+<td>apply analytical incidental-parameter bias correction</td>
+</tr>
+<tr class="odd">
+<td><code>exog</code></td>
+<td><code>&quot;strict&quot;</code></td>
+<td>exogeneity: <code>&quot;strict&quot;</code> or <code>&quot;weak&quot;</code></td>
+</tr>
+<tr class="even">
+<td><code>L_T</code></td>
+<td><code>NULL</code></td>
+<td>HAC bandwidth (<span class="math inline">\(\lfloor 2T^{1/5}\rfloor\)</span> if <code>NULL</code>)</td>
+</tr>
+<tr class="odd">
+<td><code>c_f</code></td>
+<td><code>0.6</code></td>
+<td>SVT threshold constant (used with <code>ife_select_r_unb()</code>)</td>
+</tr>
+<tr class="even">
+<td><code>nu_NT</code></td>
+<td><code>NULL</code></td>
+<td>NNR penalty (cross-validated if <code>NULL</code>)</td>
+</tr>
+<tr class="odd">
+<td><code>tol</code></td>
+<td><code>1e-9</code></td>
+<td>outer-loop convergence tolerance</td>
+</tr>
+<tr class="even">
+<td><code>max_iter</code></td>
+<td><code>10000L</code></td>
+<td>outer-loop iteration cap</td>
+</tr>
+<tr class="odd">
+<td><code>tol_em</code></td>
+<td><code>1e-7</code></td>
+<td>EM inner-loop convergence tolerance</td>
+</tr>
+<tr class="even">
+<td><code>max_iter_em</code></td>
+<td><code>500L</code></td>
+<td>EM inner-loop iteration cap</td>
+</tr>
+</tbody>
+</table>
+<hr />
+</div>
+</div>
+<div id="references" class="section level1">
+<h1><span class="header-section-number">6</span> References</h1>
+<p>Bai, J. (2009). Panel data models with interactive fixed effects. <em>Econometrica</em>, <strong>77</strong>(4), 1229–1279. <a href="doi:10.3982/ECTA6135" class="uri">doi:10.3982/ECTA6135</a></p>
+<p>Bai, J. and Ng, S. (2002). Determining the number of factors in approximate factor models. <em>Econometrica</em>, <strong>70</strong>(1), 191–221. <a href="doi:10.1111/1468-0262.00273" class="uri">doi:10.1111/1468-0262.00273</a></p>
+<p>Bai, J. and Ng, S. (2021). Matrix completion, counterfactuals, and factor analysis of missing data. <em>Journal of the American Statistical Association</em>, <strong>116</strong>(536), 1746–1763. <a href="doi:10.1080/01621459.2021.1967163" class="uri">doi:10.1080/01621459.2021.1967163</a></p>
+<p>Baltagi, B. H. (1995). <em>Econometric Analysis of Panel Data</em>. Wiley.</p>
+<p>Arellano, M. (1987). Computing robust standard errors for within-groups estimators. <em>Oxford Bulletin of Economics and Statistics</em>, <strong>49</strong>(4), 431–434.</p>
+<p>Cameron, A. C., Gelbach, J. B. and Miller, D. L. (2011). Robust inference with multiway clustering. <em>Journal of Business &amp; Economic Statistics</em>, <strong>29</strong>(2), 238–249. <a href="doi:10.1198/jbes.2010.07136" class="uri">doi:10.1198/jbes.2010.07136</a></p>
+<p>Mazumder, R., Hastie, T. and Tibshirani, R. (2010). Spectral regularization algorithms for learning large incomplete matrices. <em>Journal of Machine Learning Research</em>, <strong>11</strong>, 2287–2322.</p>
+<p>Moon, H. R. and Weidner, M. (2017). Dynamic linear panel regression models with interactive fixed effects. <em>Econometric Theory</em>, <strong>33</strong>, 158–195. <a href="doi:10.1017/S0266466615000328" class="uri">doi:10.1017/S0266466615000328</a></p>
+<p>Newey, W. K. and West, K. D. (1987). A simple, positive semi-definite, heteroskedasticity and autocorrelation consistent covariance matrix. <em>Econometrica</em>, <strong>55</strong>(3), 703–708. <a href="doi:10.2307/1913610" class="uri">doi:10.2307/1913610</a></p>
+<p>Su, L., Wang, F. and Wang, Y. (2025). Estimation and inference for interactive fixed effects panel data models with unbalanced panels. SSRN Working Paper No. 5177283. <a href="doi:10.2139/ssrn.5177283" class="uri">doi:10.2139/ssrn.5177283</a></p>
 </div>
 
 

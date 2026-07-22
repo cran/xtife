@@ -28,7 +28,15 @@ ife(
 \item{r}{integer >= 0, number of interactive factors (default 1)}
 
 \item{force}{additive FE specification: \code{"none"} | \code{"unit"} | \code{"time"} |
-\code{"two-way"} (default \code{"two-way"})}
+\code{"two-way"} (default \code{"two-way"}). Additive unit effects \eqn{\alpha_i}
+and time effects \eqn{\xi_t} are removed via the standard within
+transformation (iterative demeaning) before the SVD algorithm runs,
+following Bai (2009) Section 3. Bai (2009, p.1) shows that two-way
+additive effects are a special case of the interactive structure with
+\eqn{r = 2} (setting \eqn{F_t = (1, \xi_t)'} and
+\eqn{\lambda_i = (\alpha_i, 1)'}), so the IFE estimator remains consistent
+when additive effects are present regardless of the \code{force} choice, but
+pre-demeaning improves efficiency.}
 
 \item{se}{SE type: \code{"standard"} | \code{"robust"} | \code{"cluster"}
 (default \code{"standard"}; \code{"cluster"} clusters by unit id)}

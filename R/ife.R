@@ -157,7 +157,10 @@
       M      <- crossprod(E) / (N * T)         # N x N
       eig    <- eigen(M, symmetric = TRUE)
       Lambda <- eig$vectors[, seq_len(r), drop = FALSE] * sqrt(N)  # N x r
-      F_hat  <- E %*% Lambda / N               # T x r
+      F_raw  <- E %*% Lambda / N               # T x r  (not yet normalised)
+      # Renormalise via SVD to guarantee F'F/T = I_r (same as T <= N branch)
+      sv_F   <- svd(F_raw, nu = r, nv = 0L)
+      F_hat  <- sv_F$u[, seq_len(r), drop = FALSE] * sqrt(T)       # T x r
     }
     F_hat
   }
@@ -474,65 +477,68 @@
 #' @param N,TT,p,r  panel dimensions
 #' @return list with elements:
 #'   beta_bc  p-vector: bias-corrected coefficients
-#'   B_hat    p-vector: estimated cross-section bias term (pre-scaling by 1/N)
-#'   C_hat    p-vector: estimated time-heteroskedasticity bias term (pre-scaling by 1/T)
+#'   B_hat    p-vector: estimated cross-section BIAS (Bai sign convention,
+#'            B/N scale): beta_bc = beta - B_hat/N - C_hat/T holds exactly
+#'   C_hat    p-vector: estimated time-heteroskedasticity BIAS (C/T scale)
 .bias_correct <- function(beta, F_hat, Lambda_hat, X_dm_arr, X_tilde, e_mat,
                           N, TT, p, r) {
 
-  # D0^{-1} = (A/NT)^{-1} where A = X_tilde'X_tilde  (same as in .ife_se)
+  # ----------------------------------------------------------------------------
+  # Bai (2009) Section 7 two-term bias correction (B/N cross-sectional +
+  # C/T time-series heteroskedasticity).  The estimators use the
+  # Moon & Weidner (2017) Definition-1 form built from the factor-PROJECTED
+  # regressor (M_lambda X_k for B, M_f X_k for C).  These are algebraically the
+  # Bai (2009) B and C terms but, unlike the raw-regressor implementation used
+  # previously, the *time* term (C) does not amplify the common per-time error
+  # variance noise omega_t -> its sampling variance stays O(1/(NT)) instead of
+  # O(1), so the correction no longer over-corrects under heteroskedasticity.
+  # Under homoskedasticity B = C = 0 exactly (lambda'M_lambda = 0, f'M_f = 0),
+  # so the correction is a no-op as it should be.  Same machinery as the B2/B3
+  # terms in .bias_correct_mw; see data-raw/hpc/DECISIONS_mc_audit.md.
+  # ----------------------------------------------------------------------------
+
+  Gf <- solve(crossprod(F_hat))         # (F'F)^{-1}            r x r
+  Gl <- solve(crossprod(Lambda_hat))    # (Lambda'Lambda)^{-1}  r x r
+
+  # D0_inv = W^{-1}, W = X_tilde'X_tilde / (NT)  (factor-projected regressors)
   Xt_long <- matrix(0, TT * N, p)
   for (k in seq_len(p)) Xt_long[, k] <- as.vector(X_tilde[, , k])
-  A      <- crossprod(Xt_long)           # p x p
-  D0_inv <- solve(A / (N * TT))          # (N*TT) * solve(A)
+  D0_inv <- solve(crossprod(Xt_long) / (N * TT))     # p x p
 
-  # G = (Lambda'Lambda/N)^{-1},  r x r
-  G     <- solve(crossprod(Lambda_hat) / N)
-  # A_mat = Lambda G Lambda',  N x N  (symmetric)
-  A_mat <- Lambda_hat %*% G %*% t(Lambda_hat)
+  Pf    <- F_hat %*% (Gf %*% t(F_hat))               # T x T projection onto F
+  rss_t <- rowSums(e_mat^2)             # T-vector: sum_i e_it^2  (= N * omega_t)
+  css_i <- colSums(e_mat^2)             # N-vector: sum_t e_it^2
 
-  # V_arr[t, i, k] = (1/N) * sum_j a_{ij} * X_dm[t, j, k]
-  # Matrix form for covariate k: V_k = X_dm_arr[,,k] %*% A_mat / N  (TT x N)
-  V_arr <- array(0, dim = c(TT, N, p))
+  B_vec <- numeric(p)   # cross-sectional heteroskedasticity contribution (/N)
+  C_vec <- numeric(p)   # time-series   heteroskedasticity contribution (/T)
+
   for (k in seq_len(p)) {
-    V_arr[, , k] <- X_dm_arr[, , k] %*% A_mat / N
+    X_k <- X_dm_arr[, , k]              # T x N
+
+    # B (cross-section): (1/T) sum e_it^2 [M_lambda X_k f (f'f)^-1 (lam'lam)^-1 lam']_ii
+    Xk_NT <- t(X_k)                                   # N x T
+    Ml_Xk <- Xk_NT - Lambda_hat %*% (Gl %*% (t(Lambda_hat) %*% Xk_NT))  # M_lam X_k
+    A2    <- Ml_Xk %*% F_hat %*% Gf %*% Gl            # N x r
+    diag2 <- rowSums(A2 * Lambda_hat)                 # N-vector
+    B_vec[k] <- (sum(css_i * diag2) / TT) / N         # -> (1/N) W^{-1} contribution
+
+    # C (time): (1/N) sum e_it^2 [M_f X_k lam (lam'lam)^-1 (f'f)^-1 f']_tt
+    Mf_Xk <- X_k - Pf %*% X_k                         # M_f X_k  (T x N)
+    A3    <- Mf_Xk %*% Lambda_hat %*% Gl %*% Gf       # T x r
+    diag3 <- rowSums(A3 * F_hat)                      # T-vector
+    C_vec[k] <- (sum(rss_t * diag3) / N) / TT         # -> (1/T) W^{-1} contribution
   }
 
-  # unit error variances: sigma2_i = (1/T) sum_t eps_{it}^2  (N-vector)
-  sigma2_i <- colMeans(e_mat^2)          # average over T rows for each of N units
+  beta_bc <- beta + as.vector(D0_inv %*% (B_vec + C_vec))
 
-  # --- B_hat (Eq. 17): bias from cross-section heteroskedasticity ---
-  sum_B <- numeric(p)
-  for (i in seq_len(N)) {
-    diff_i  <- X_dm_arr[, i, ] - V_arr[, i, ]              # T x p
-    # contribution: (p x T)(T x r)/T = p x r; then (p x r)(r x r)(r x 1)*scalar = p x 1
-    # Parenthesise /T before next %*% to avoid R operator-precedence issue
-    contrib <- (t(diff_i) %*% F_hat / TT) %*% G %*% Lambda_hat[i, ] * sigma2_i[i]
-    sum_B   <- sum_B + as.vector(contrib)
-  }
-  B_hat <- -D0_inv %*% (sum_B / N)      # p x 1
-
-  # --- C_hat (Eq. 19): bias from time-varying heteroskedasticity ---
-  # omega_t = (1/N) sum_k eps_{kt}^2  -- T-vector (time-wise mean squared residual)
-  omega <- rowMeans(e_mat^2)
-  # M_F * Omega * F = Omega*F - (1/T)*F*(F'*Omega*F)   [T x r]
-  # Parenthesise (F_hat / T) to avoid R precedence issue: F/T %*% ... parses wrong
-  MF_Omega_F <- (omega * F_hat) -
-                (F_hat / TT) %*% (t(F_hat) %*% (omega * F_hat))
-
-  sum_C <- numeric(p)
-  for (i in seq_len(N)) {
-    X_i     <- X_dm_arr[, i, ]                             # T x p
-    # (p x T)(T x r)(r x r)(r x 1) = p x 1
-    contrib <- t(X_i) %*% MF_Omega_F %*% G %*% Lambda_hat[i, ]
-    sum_C   <- sum_C + as.vector(contrib)
-  }
-  C_hat <- -D0_inv %*% (sum_C / N)      # p x 1
-
-  beta_bc <- beta - as.vector(B_hat) / N - as.vector(C_hat) / TT
-
+  # Bai (2009) sign convention: the raw estimator's bias is +B/N + C/T, so the
+  # corrected estimator is beta_bc = beta - B_hat/N - C_hat/T.  The internal
+  # B_vec/C_vec are the (additive) correction contributions, i.e. MINUS the
+  # bias, hence the negation here.  This makes the identity printed by
+  # print.ife() ("beta^ = beta_raw - B/N - C/T") hold exactly.
   list(beta_bc = beta_bc,
-       B_hat   = as.vector(B_hat),
-       C_hat   = as.vector(C_hat))
+       B_hat   = -as.vector(D0_inv %*% B_vec) * N,   # bias estimate, B/N scale
+       C_hat   = -as.vector(D0_inv %*% C_vec) * TT)  # bias estimate, C/T scale
 }
 
 
@@ -564,59 +570,90 @@
 #' @param M1         lag bandwidth for B1 (number of lags to include; default 1)
 #' @return list:
 #'   beta_bc  p-vector: bias-corrected coefficients
-#'   B1_hat   p-vector: dynamic bias term (pre-multiplied by D0_inv; scaled by 1/(NT))
-#'   B2_hat   p-vector: cross-section heteroscedasticity bias (same as Bai B_hat)
-#'   B3_hat   p-vector: time heteroscedasticity bias (same as Bai C_hat)
+#'   B1_hat   p-vector: dynamic-term contribution  W^-1 B1/T  (additive)
+#'   B2_hat   p-vector: cross-section-het contribution  W^-1 B2/N
+#'   B3_hat   p-vector: time-het contribution  W^-1 B3/T
+#'   The decomposition identity beta_bc = beta + B1_hat + B2_hat + B3_hat
+#'   holds exactly (all scalings and the W^-1 weighting are inside).
 .bias_correct_mw <- function(beta, F_hat, Lambda_hat, X_dm_arr, X_tilde,
                               e_mat, N, TT, p, r, M1 = 1L) {
 
-  # --- B2 and B3: reuse Bai (2009) formulae (algebraically equivalent to MW) ---
-  # Math-verifier confirmed: trunc(res*res',1,1) in MW B2 keeps diagonal only =
-  # sigma2_i used in Bai B_hat.  trunc(res'*res,1,1) in MW B3 (M2=0) keeps
-  # diagonal only = omega_t used in Bai C_hat.
-  bc_bai <- .bias_correct(beta, F_hat, Lambda_hat, X_dm_arr, X_tilde,
-                           e_mat, N, TT, p, r)
+  # ----------------------------------------------------------------------------
+  # Moon & Weidner (2017) three-term bias correction, Definition 1 + Theorem 4.3.
+  # Corrected estimator: beta* = beta + (1/T) W^{-1} B1 + (1/N) W^{-1} B2
+  #                                     + (1/T) W^{-1} B3,  with W = X~'X~/(NT).
+  #
+  # IMPORTANT (variance): B2 and B3 use the MW Definition 1 estimators built from
+  # the FACTOR-PROJECTED regressor (M_lambda X_k and M_f X_k).  An earlier version
+  # reused the Bai (2009) B_hat/C_hat formulae here; those are equal in the mean
+  # but, for a large lagged-dependent regressor, the *time* term (B3) inherited the
+  # full magnitude of the raw regressor and amplified the common per-time variance
+  # noise omega_t, inflating Var(beta*) ~2x and collapsing CI coverage.  Using the
+  # projected MW form keeps B3's variance O(1/(NT)).  See data-raw/hpc/
+  # DECISIONS_mc_audit.md (Part A2) for the MW Table-1 benchmark that pinned this.
+  # ----------------------------------------------------------------------------
 
-  # D0_inv = (A/NT)^{-1} where A = X_tilde'X_tilde (double-projected)
+  Gf <- solve(crossprod(F_hat))         # (F'F)^{-1}      r x r
+  Gl <- solve(crossprod(Lambda_hat))    # (Lambda'Lambda)^{-1}  r x r
+
+  # D0_inv = W^{-1}, W = X_tilde'X_tilde / (NT)  (double-projected regressors)
   Xt_long <- matrix(0, TT * N, p)
   for (k in seq_len(p)) Xt_long[, k] <- as.vector(X_tilde[, , k])
-  D0_inv <- solve(crossprod(Xt_long) / (N * T))      # p x p
+  D0_inv <- solve(crossprod(Xt_long) / (N * TT))     # p x p
 
   # P_F = F (F'F)^{-1} F'  (T x T projection onto column space of F)
-  FtF_inv <- solve(crossprod(F_hat))                  # r x r
-  Pf      <- F_hat %*% (FtF_inv %*% t(F_hat))        # T x T (symmetric)
+  Pf <- F_hat %*% (Gf %*% t(F_hat))                  # T x T (symmetric)
 
-  # --- B1: dynamic bias from predetermined regressors (MW Eq. 4.4 estimator) ---
-  # B1_hat[k] = trace(P_F * cross_trunc_k) / (N*T)
-  # cross_k[t,s] = sum_i e_{it} * X_{k,is}  (T x T),
-  # cross_trunc_k keeps only entries where 1 <= s-t <= M1 (MW: trunc(..., 0, M1+1))
-  # Bias correction: beta_bc += D0_inv %*% B1_hat  (positive addition; math-verifier Q2)
-  # The 1/(NT) factor absorbs both MW's 1/sqrt(NT) in B1 and 1/sqrt(NT) in bcorr1,
-  # so NO additional /T is needed (math-verifier Q1c).
-  B1_vec <- numeric(p)
+  rss_t <- rowSums(e_mat^2)             # T-vector: sum_i e_it^2  (= N * omega_t)
+  css_i <- colSums(e_mat^2)             # N-vector: sum_t e_it^2
+
+  B1_vec <- numeric(p)   # dynamic (Nickell-type) predetermined-regressor term
+  B2_vec <- numeric(p)   # cross-sectional heteroskedasticity term  (MW B2)
+  B3_vec <- numeric(p)   # time-series heteroskedasticity term      (MW B3)
+
   for (k in seq_len(p)) {
-    X_k    <- X_dm_arr[, , k]                         # T x N
-    # cross_k[t,s] = sum_i e_{it} * X_{k,is}  (T x T)
-    cross_k <- e_mat %*% t(X_k)                       # (T x N)(N x T) = T x T
-    # Keep only upper-triangle entries with lag s-t in {1, ..., M1}
+    X_k <- X_dm_arr[, , k]            # T x N (raw, after additive-FE demeaning)
+
+    # --- B1: predetermined-regressor bias (MW Def 1, kernel-truncated, lag<=M1) ---
+    # B1_hat,k = (1/N) sum_{t<s<=t+M1} [P_f]_ts sum_i e_it X_{k,is}.
+    # Stored as B1_vec = B1_hat / T so that D0_inv %*% B1_vec = (1/T) W^{-1} B1.
+    cross_k     <- e_mat %*% t(X_k)                   # T x T: [t,s] = sum_i e_it X_is
     cross_trunc <- matrix(0, TT, TT)
     for (lag in seq_len(M1)) {
       t_idx <- seq_len(TT - lag)
       cross_trunc[cbind(t_idx, t_idx + lag)] <- cross_k[cbind(t_idx, t_idx + lag)]
     }
-    # trace(Pf %*% cross_trunc) = sum(Pf * cross_trunc) since Pf symmetric
     B1_vec[k] <- sum(Pf * cross_trunc) / (N * TT)
+
+    # --- B2 (MW Def 1): cross-sectional heteroskedasticity, projected regressor ---
+    # B2_hat,k = (1/T) sum_{i,t} e_it^2 [M_lambda X_k f (f'f)^{-1}(lam'lam)^{-1} lam']_ii
+    Xk_NT <- t(X_k)                                   # N x T
+    Ml_Xk <- Xk_NT - Lambda_hat %*% (Gl %*% (t(Lambda_hat) %*% Xk_NT))  # M_lam X_k
+    A2    <- Ml_Xk %*% F_hat %*% Gf %*% Gl            # N x r
+    diag2 <- rowSums(A2 * Lambda_hat)                 # N-vector: [A2 lam']_ii
+    B2_hat_k  <- sum(css_i * diag2) / TT              # (1/T) sum_{i,t} e_it^2 diag2_i
+    B2_vec[k] <- B2_hat_k / N                         # -> (1/N) W^{-1} B2
+
+    # --- B3 (MW Def 1): time-series heteroskedasticity, projected regressor ---
+    # B3_hat,k = (1/N) sum_{i,t} e_it^2 [M_f X_k lam (lam'lam)^{-1}(f'f)^{-1} f']_tt
+    Mf_Xk <- X_k - Pf %*% X_k                         # M_f X_k  (T x N)
+    A3    <- Mf_Xk %*% Lambda_hat %*% Gl %*% Gf       # T x r
+    diag3 <- rowSums(A3 * F_hat)                      # T-vector: [A3 f']_tt
+    B3_hat_k  <- sum(rss_t * diag3) / N               # (1/N) sum_{i,t} e_it^2 diag3_t
+    B3_vec[k] <- B3_hat_k / TT                        # -> (1/T) W^{-1} B3
   }
 
-  # Apply all three corrections:
-  #   B2 and B3 already incorporated in bc_bai$beta_bc (via beta - B_hat/N - C_hat/T)
-  #   B1: add D0_inv %*% B1_vec (no /T; the 1/T is absorbed in the 1/(NT) normalization)
-  beta_bc <- bc_bai$beta_bc + as.vector(D0_inv %*% B1_vec)
+  # beta* = beta + W^{-1}(B1/T + B2/N + B3/T)   [all three added; MW Thm 4.3]
+  beta_bc <- beta + as.vector(D0_inv %*% (B1_vec + B2_vec + B3_vec))
 
+  # Store the per-coefficient ADDITIVE CONTRIBUTIONS W^{-1} B_l (with the 1/T or
+  # 1/N scaling already inside B*_vec), so that the decomposition identity
+  #   beta_bc = beta + B1_hat + B2_hat + B3_hat
+  # holds exactly.  print.ife() prints these contributions as-is.
   list(beta_bc = beta_bc,
-       B1_hat  = B1_vec,
-       B2_hat  = bc_bai$B_hat,   # same as Bai B_hat (cross-section heteroscedasticity)
-       B3_hat  = bc_bai$C_hat)   # same as Bai C_hat (time-series heteroscedasticity)
+       B1_hat  = as.vector(D0_inv %*% B1_vec),
+       B2_hat  = as.vector(D0_inv %*% B2_vec),
+       B3_hat  = as.vector(D0_inv %*% B3_vec))
 }
 
 
@@ -635,7 +672,15 @@
 #' @param index    character(2): `c("unit_id_column", "time_id_column")`
 #' @param r        integer >= 0, number of interactive factors (default 1)
 #' @param force    additive FE specification: `"none"` | `"unit"` | `"time"` |
-#'   `"two-way"` (default `"two-way"`)
+#'   `"two-way"` (default `"two-way"`). Additive unit effects \eqn{\alpha_i}
+#'   and time effects \eqn{\xi_t} are removed via the standard within
+#'   transformation (iterative demeaning) before the SVD algorithm runs,
+#'   following Bai (2009) Section 3. Bai (2009, p.1) shows that two-way
+#'   additive effects are a special case of the interactive structure with
+#'   \eqn{r = 2} (setting \eqn{F_t = (1, \xi_t)'} and
+#'   \eqn{\lambda_i = (\alpha_i, 1)'}), so the IFE estimator remains consistent
+#'   when additive effects are present regardless of the `force` choice, but
+#'   pre-demeaning improves efficiency.
 #' @param se       SE type: `"standard"` | `"robust"` | `"cluster"`
 #'   (default `"standard"`; `"cluster"` clusters by unit id)
 #' @param bias_corr logical; if `TRUE` apply bias correction. For
@@ -727,7 +772,16 @@ ife <- function(formula,
   time_col <- index[2]
 
   # ---- parse formula ----
-  vars     <- all.vars(formula)
+  # Reject transformed formulas: all.vars() strips calls, so log(y) ~ x would
+  # silently estimate y ~ x.  Require plain column names; users should create
+  # transformed variables in `data` first.
+  fml_names <- setdiff(all.names(formula), c("~", "+"))
+  vars      <- all.vars(formula)
+  if (!identical(sort(fml_names), sort(vars)))
+    stop("Formula contains transformations or operators (",
+         paste(setdiff(fml_names, vars), collapse = ", "),
+         "). Create transformed variables in 'data' first, e.g. ",
+         "data$log_y <- log(data$y), then use log_y in the formula.")
   y_name   <- vars[1]
   x_names  <- vars[-1]
   p        <- length(x_names)
@@ -739,6 +793,9 @@ ife <- function(formula,
 
   # ---- sort and check balance ----
   data <- data[order(data[[id_col]], data[[time_col]]), ]
+  if (anyDuplicated(data[, c(id_col, time_col)]) > 0L)
+    stop("Duplicate (unit, time) pairs found in 'data'. Each unit-time cell ",
+         "must appear exactly once.")
   unit_vals <- unique(data[[id_col]])
   time_vals <- unique(data[[time_col]])
   N <- length(unit_vals)
@@ -769,6 +826,10 @@ ife <- function(formula,
   # check r does not exceed min(N,T)
   if (r > min(N, T))
     stop("r = ", r, " exceeds min(N, T) = ", min(N, T), ".")
+
+  # M1 (dynamic bias-correction lag bandwidth) must leave at least one usable lag
+  if (method == "dynamic" && M1 > T - 1L)
+    stop("M1 = ", M1, " must be <= T - 1 = ", T - 1L, ".")
 
   # ---- reshape to matrix / array form ----
   # Orientation: rows = time, columns = units (T x N)
@@ -1062,14 +1123,16 @@ print.ife <- function(x, digits = 4, ...) {
     if (isTRUE(x$method == "dynamic")) {
       cat("Bias correction (Moon & Weidner 2017): beta* = beta + W^{-1}(B1/T + B2/N + B3/T)\n")
       cat(sprintf("  Method: dynamic  N=%d  T=%d  M1=%d\n", x$N, x$T, x$M1))
+      # B*_hat are the additive contributions W^{-1}B_l (scalings included):
+      # raw + B1 + B2 + B3 = corrected, exactly.
       for (nm in x$x_names) {
         cat(sprintf(
-          "  %-12s raw=%8.4f  B1/T=%9.6f  B2/N=%9.6f  B3/T=%9.6f  corrected=%8.4f\n",
+          "  %-12s raw=%8.4f  B1=%9.6f  B2=%9.6f  B3=%9.6f  corrected=%8.4f\n",
           nm,
           x$coef_raw[nm],
-          x$B1_hat[nm] / x$T,
-          x$B2_hat[nm] / x$N,
-          x$B3_hat[nm] / x$T,
+          x$B1_hat[nm],
+          x$B2_hat[nm],
+          x$B3_hat[nm],
           x$coef[nm]))
       }
     } else {
@@ -1167,12 +1230,29 @@ ife_select_r <- function(formula,
   time_col <- index[2]
 
   # ---- parse formula + basic data prep (mirrors ife() internals) ----
-  vars    <- all.vars(formula)
+  # Same transformed-formula guard as ife(): all.vars() strips calls.
+  fml_names <- setdiff(all.names(formula), c("~", "+"))
+  vars      <- all.vars(formula)
+  if (!identical(sort(fml_names), sort(vars)))
+    stop("Formula contains transformations or operators (",
+         paste(setdiff(fml_names, vars), collapse = ", "),
+         "). Create transformed variables in 'data' first.")
   y_name  <- vars[1]
   x_names <- vars[-1]
   p       <- length(x_names)
 
+  for (v in c(y_name, x_names)) {
+    if (!v %in% names(data))
+      stop("Variable not found in data: ", v)
+    if (any(is.na(data[[v]])))
+      stop("Missing values in variable '", v,
+           "'. Remove rows with NA before calling ife_select_r().")
+  }
+
   data <- data[order(data[[id_col]], data[[time_col]]), ]
+  if (anyDuplicated(data[, c(id_col, time_col)]) > 0L)
+    stop("Duplicate (unit, time) pairs found in 'data'. Each unit-time cell ",
+         "must appear exactly once.")
   N    <- length(unique(data[[id_col]]))
   T    <- length(unique(data[[time_col]]))
 

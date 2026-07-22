@@ -1,0 +1,10 @@
+citHeader("To cite xtife in publications use:")
+
+bibentry(
+  bibtype  = "Manual",
+  title    = "{xtife}: Interactive Fixed Effects Estimator for Panel Data",
+  author   = person("Binzhi", "Chen"),
+  year     = "2026",
+  note     = "R package version 0.1.4",
+  url      = "https://CRAN.R-project.org/package=xtife"
+)

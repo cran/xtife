@@ -24,8 +24,9 @@
 \value{
 list with elements:
 beta_bc  p-vector: bias-corrected coefficients
-B_hat    p-vector: estimated cross-section bias term (pre-scaling by 1/N)
-C_hat    p-vector: estimated time-heteroskedasticity bias term (pre-scaling by 1/T)
+B_hat    p-vector: estimated cross-section BIAS (Bai sign convention,
+B/N scale): beta_bc = beta - B_hat/N - C_hat/T holds exactly
+C_hat    p-vector: estimated time-heteroskedasticity BIAS (C/T scale)
 }
 \description{
 Applies the two-term asymptotic bias correction from Bai (2009)
